@@ -395,6 +395,37 @@ input[type="checkbox"] { width: 1.1rem; height: 1.1rem; accent-color: var(--fore
 .insight-card strong { display: block; margin-bottom: .35rem; }
 .insight-card p { margin: 0; color: var(--muted); font-size: .77rem; }
 
+/* 成績：評量工具、缺考與匯入預覽 */
+.assessment-head { display: grid; gap: .15rem; }
+.assessment-name { padding: 0; border: 0; color: var(--ink); background: transparent; font-weight: 700; font-size: inherit; text-align: left; cursor: pointer; }
+.assessment-name:hover { color: var(--forest-700); text-decoration: underline; }
+.assessment-tools { display: flex; gap: .5rem; margin-top: .15rem; }
+.assessment-tools button { padding: 0; border: 0; color: var(--muted); background: transparent; font-size: .66rem; font-weight: 700; cursor: pointer; }
+.assessment-tools button:hover { color: var(--forest-700); }
+.score-cell { position: relative; }
+.score-cell.is-absent .score-input { background: var(--sun-soft); }
+.score-cell .score-input::placeholder { color: #8b631d; font-style: italic; }
+.absent-toggle { margin-left: .3rem; padding: .15rem .35rem; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--paper); font-size: .62rem; font-weight: 700; cursor: pointer; }
+.absent-toggle.is-on { color: #8b631d; border-color: #f0dcae; background: var(--sun-soft); }
+.weight-notice, .undo-notice { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .8rem; margin: 1rem 0 0; padding: .75rem .9rem; border-radius: 12px; font-size: .8rem; }
+.weight-notice { background: var(--sun-soft); color: #8b631d; }
+.undo-notice { background: var(--forest-50); }
+.undo-notice .btn { margin-left: auto; }
+.import-summary { display: flex; flex-wrap: wrap; gap: .4rem .9rem; margin-bottom: .8rem; font-size: .78rem; color: var(--muted); }
+.import-summary strong { color: var(--ink); font-size: .95rem; margin-right: .2rem; }
+.import-summary .is-warn strong { color: #8b631d; }
+.import-summary .is-bad strong { color: #c0392b; }
+.import-warn { padding: .7rem .85rem; border-radius: 12px; background: var(--sun-soft); color: #8b631d; font-size: .78rem; display: grid; gap: .15rem; margin-bottom: .8rem; }
+.import-table { max-height: 46vh; overflow-y: auto; }
+.import-table tr.is-invalid { background: #fdecec; }
+.import-table tr.is-blank { color: var(--muted); }
+.import-table small { display: block; color: var(--muted); font-size: .68rem; }
+.import-tag { display: inline-block; padding: .1rem .4rem; border-radius: 999px; font-size: .66rem; font-weight: 700; }
+.import-tag.t-new { color: var(--forest-800); background: var(--forest-50); }
+.import-tag.t-overwrite, .import-tag.t-absent { color: #8b631d; background: var(--sun-soft); }
+.import-tag.t-invalid { color: #8a2f2f; background: #fdecec; }
+.import-tag.t-same, .import-tag.t-blank { color: var(--muted); background: var(--line); }
+
 /* 出席紀錄 */
 .month-bar { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
 .month-label { flex: 1; display: grid; min-width: 150px; }

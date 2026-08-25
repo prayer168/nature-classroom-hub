@@ -15,7 +15,7 @@
  */
 
 const APP_NAME = '自然課堂中控站';
-const SCRIPT_VERSION = '2.3.0';
+const SCRIPT_VERSION = '2.4.0';
 const SCHEMA_VERSION = 2;
 
 const PROP_SHEET_ID = 'NATURE_HUB_SHEET_ID';
@@ -35,7 +35,7 @@ const SHEET_DEFINITIONS = {
   Rewards: ['id', 'studentId', 'category', 'value', 'note', 'createdAt'],
   RewardMenu: ['id', 'name', 'cost', 'type', 'note'],
   Assessments: ['id', 'name', 'type', 'maxScore', 'weight', 'date'],
-  Scores: ['studentId', 'assessmentId', 'score'],
+  Scores: ['studentId', 'assessmentId', 'score', 'status'],
   Observations: ['id', 'studentId', 'category', 'level', 'note', 'lesson', 'createdAt'],
   Resources: ['id', 'name', 'category', 'grade', 'type', 'url', 'size', 'tags', 'createdAt'],
   Metadata: ['key', 'value']
@@ -145,10 +145,15 @@ function readSheetsSnapshot_(spreadsheet) {
   });
 
   const scores = {};
+  const scoreStatus = {};
   read('Scores').forEach(row => {
     if (!row.studentId) return;
     scores[row.studentId] = scores[row.studentId] || {};
     scores[row.studentId][row.assessmentId] = row.score === '' ? null : row.score;
+    if (row.status) {
+      scoreStatus[row.studentId] = scoreStatus[row.studentId] || {};
+      scoreStatus[row.studentId][row.assessmentId] = row.status;
+    }
   });
 
   const lessons = {};
@@ -172,6 +177,7 @@ function readSheetsSnapshot_(spreadsheet) {
     rewards: { ledger: read('Rewards'), menu: read('RewardMenu') },
     assessments: read('Assessments'),
     scores,
+    scoreStatus,
     resources: read('Resources').map(item => ({ ...item, tags: String(item.tags || '').split(',').map(tag => tag.trim()).filter(String) })),
     updatedAt: metadata.updatedAt || new Date().toISOString(),
     backupSource: 'auto'
@@ -417,7 +423,7 @@ function syncPayload_(payload) {
   const scoreRows = [];
   Object.keys(safePayload.scores || {}).forEach(studentId => {
     Object.keys(safePayload.scores[studentId] || {}).forEach(assessmentId => {
-      scoreRows.push({ studentId, assessmentId, score: safePayload.scores[studentId][assessmentId] });
+      scoreRows.push({ studentId, assessmentId, score: safePayload.scores[studentId][assessmentId], status: (safePayload.scoreStatus && safePayload.scoreStatus[studentId] && safePayload.scoreStatus[studentId][assessmentId]) || '' });
     });
   });
   writeObjects_(spreadsheet, 'Scores', scoreRows);

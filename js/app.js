@@ -1,5 +1,5 @@
 import { renderChrome } from "./chrome.js";
-import { store, activeClass, activeStudents, activeLesson, activeGrade, visibleResources, resourceScopes, RESOURCE_SCOPE_ALL, studentNumberFor, getTodayAttendance, attendanceDatesInMonth, attendanceAdjustedOn, setAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, uniqueId, dateKey } from "./store.js";
+import { store, activeClass, activeStudents, activeLesson, activeGrade, visibleResources, resourceScopes, RESOURCE_SCOPE_ALL, studentNumberFor, getTodayAttendance, attendanceDatesInMonth, attendanceAdjustedOn, setAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, totalWeight, effectiveScore, isAbsentExam, absentExamScore, scoreStatusOf, setScoreStatus, ABSENT_PENALTY, uniqueId, dateKey } from "./store.js";
 import { saveFile, getFile, deleteFile } from "./resource-db.js";
 import QRCode from "qrcode";
 import { pingGoogle, syncToGoogle, fetchGoogleBackup, uploadFileToGoogle, createGoogleDocReport, createStudentGoogleDocReport, diagnoseGoogle, selfTestGoogle, isValidAppsScriptUrl, compareScriptVersion, EXPECTED_SCRIPT_VERSION } from "./google-bridge.js";
@@ -507,25 +507,306 @@ function exportLedger() {
 function initGrades() {
   const state = store.get();
   const students = activeStudents(state);
-  const pending = students.filter(student => state.assessments.some(item => state.scores[student.id]?.[item.id] === null || state.scores[student.id]?.[item.id] === undefined)).length;
+  const pending = students.filter(student => state.assessments.some(item => effectiveScore(student.id, item.id, state) === null)).length;
   const best = [...state.assessments].sort((a, b) => assessmentAverage(b.id, state) - assessmentAverage(a.id, state))[0];
-  $("#grade-stats").innerHTML = [statCard("班級平均", classAverage(state).toFixed(1), "依評量權重自動換算", "均"), statCard("目前評量", state.assessments.length, `總權重 ${state.assessments.reduce((s, a) => s + a.weight, 0)}%`, "項"), statCard("待補成績", pending, "至少一項尚未輸入", "待"), statCard("表現較佳項目", best?.name || "—", `${assessmentAverage(best?.id, state).toFixed(1)}%`, "優")].join("");
-  $("#gradebook-head").innerHTML = `<tr><th>學生</th>${state.assessments.map(item => `<th><div class="assessment-head"><strong>${esc(item.name)}</strong><small>${item.maxScore} 分 · 權重 ${item.weight}%</small></div></th>`).join("")}<th>加權平均</th></tr>`;
-  $("#gradebook-body").innerHTML = students.map(student => `<tr><td><div class="student-cell"><span class="avatar">${student.seat}</span><div><strong>${esc(student.number)}</strong><small>${student.seat} 號</small></div></div></td>${state.assessments.map(item => { const value = state.scores[student.id]?.[item.id]; return `<td><input class="score-input" data-student="${student.id}" data-assessment="${item.id}" data-max="${item.maxScore}" type="number" min="0" max="${item.maxScore}" value="${value ?? ""}" aria-label="學生 ${esc(student.number)} ${esc(item.name)}分數"></td>`; }).join("")}<td><span class="score-average">${studentAverage(student.id, state)?.toFixed(1) || "—"}</span></td></tr>`).join("");
+  const absentCount = students.reduce((sum, student) => sum + state.assessments.filter(item => isAbsentExam(student.id, item.id, state)).length, 0);
+  const weight = totalWeight(state);
+  $("#gradebook-title").textContent = `${activeClass(state).name}成績簿`;
+  $("#grade-stats").innerHTML = [
+    statCard("班級平均", classAverage(state).toFixed(1), "依評量權重自動換算", "均"),
+    statCard("目前評量", state.assessments.length, `總權重 ${weight}%`, "項"),
+    statCard("待補成績", pending, "至少一項尚未輸入", "待"),
+    statCard("缺考標記", absentCount, `未補分時以應考平均 −${ABSENT_PENALTY}`, "缺")
+  ].join("");
+
+  const warning = $("#weight-warning");
+  warning.hidden = weight === 100 || !state.assessments.length;
+  if (!warning.hidden) warning.innerHTML = `<strong>權重總和為 ${weight}%</strong><span>加權平均會以實際有成績的項目換算，但建議把總和調整為 100% 以免解讀混淆。</span>`;
+
+  $("#gradebook-head").innerHTML = `<tr><th>學生</th>${state.assessments.map(item => `<th><div class="assessment-head"><button class="assessment-name" data-edit-assessment="${item.id}" title="編輯評量">${esc(item.name)}</button><small>${item.maxScore} 分 · 權重 ${item.weight}%</small><span class="assessment-tools"><button data-duplicate-assessment="${item.id}" title="複製評量">複製</button><button data-delete-assessment="${item.id}" title="刪除評量">刪除</button></span></div></th>`).join("")}<th>加權平均</th></tr>`;
+  $("#gradebook-body").innerHTML = students.map(student => `<tr><td><div class="student-cell"><span class="avatar">${student.seat}</span><div><strong>${esc(student.number)}</strong><small>${student.seat} 號</small></div></div></td>${state.assessments.map(item => {
+    const raw = state.scores[student.id]?.[item.id];
+    const absent = isAbsentExam(student.id, item.id, state);
+    const imputed = absent && (raw === null || raw === undefined || raw === "");
+    return `<td class="score-cell${absent ? " is-absent" : ""}"><input class="score-input" data-student="${student.id}" data-assessment="${item.id}" data-max="${item.maxScore}" type="number" min="0" max="${item.maxScore}" value="${raw ?? ""}" placeholder="${imputed ? (absentExamScore(item.id, state) ?? "—") : ""}" aria-label="學生 ${esc(student.number)} ${esc(item.name)}分數"><button class="absent-toggle${absent ? " is-on" : ""}" data-absent="${student.id}|${item.id}" title="${absent ? "取消缺考標記" : "標記缺考"}" aria-pressed="${absent}">缺</button></td>`;
+  }).join("")}<td><span class="score-average">${studentAverage(student.id, state)?.toFixed(1) || "—"}</span></td></tr>`).join("");
+
   $$(".score-input").forEach(input => {
-    input.onchange = () => { const value = input.value === "" ? null : Number(input.value); if (value !== null && (value < 0 || value > Number(input.dataset.max))) { input.classList.add("invalid"); return toast(`分數需介於 0 到 ${input.dataset.max}。`, "error"); } input.classList.remove("invalid"); store.update(draft => { draft.scores[input.dataset.student] ||= {}; draft.scores[input.dataset.student][input.dataset.assessment] = value; }); initGrades(); toast("成績已儲存。"); };
+    input.onchange = () => {
+      const value = input.value === "" ? null : Number(input.value);
+      if (value !== null && (Number.isNaN(value) || value < 0 || value > Number(input.dataset.max))) { input.classList.add("invalid"); return toast(`分數需介於 0 到 ${input.dataset.max}。`, "error"); }
+      input.classList.remove("invalid");
+      store.update(draft => { draft.scores[input.dataset.student] ||= {}; draft.scores[input.dataset.student][input.dataset.assessment] = value; });
+      initGrades();
+      toast(value === null ? "成績已清除。" : "成績已儲存。");
+    };
     input.onkeydown = event => { if (event.key === "Enter") { event.preventDefault(); input.onchange(); } };
   });
-  $('[data-action="add-assessment"]').onclick = showAssessmentModal;
+  $$("[data-absent]").forEach(button => button.onclick = () => {
+    const [studentId, assessmentId] = button.dataset.absent.split("|");
+    const current = store.get();
+    const turningOn = !isAbsentExam(studentId, assessmentId, current);
+    const existing = current.scores[studentId]?.[assessmentId];
+    const hasScore = existing !== null && existing !== undefined && existing !== "";
+    // 留著舊分數會讓「缺考」標記名不副實：畫面說缺考，計分卻仍用舊分。
+    if (turningOn && hasScore && !confirm(`標記缺考會清除目前的 ${existing} 分，改以應考平均 −${ABSENT_PENALTY} 計算。\n之後補考時直接填入分數即可覆蓋。確定嗎？`)) return;
+    store.update(draft => {
+      setScoreStatus(draft, studentId, assessmentId, turningOn ? "absent" : "");
+      if (turningOn) { draft.scores[studentId] ||= {}; draft.scores[studentId][assessmentId] = null; }
+    });
+    initGrades();
+    toast(turningOn ? "已標記缺考，未補分時以應考平均計算。" : "已取消缺考標記。");
+  });
+  $$("[data-edit-assessment]").forEach(button => button.onclick = () => showAssessmentModal(button.dataset.editAssessment));
+  $$("[data-duplicate-assessment]").forEach(button => button.onclick = () => duplicateAssessment(button.dataset.duplicateAssessment));
+  $$("[data-delete-assessment]").forEach(button => button.onclick = () => deleteAssessment(button.dataset.deleteAssessment));
+
+  $('[data-action="add-assessment"]').onclick = () => showAssessmentModal();
   $('[data-action="export-grades"]').onclick = exportGrades;
+  $('[data-action="score-template"]').onclick = downloadScoreTemplate;
+  $('[data-action="import-scores"]').onclick = showScoreImportModal;
+  renderImportUndo();
 }
 
-function showAssessmentModal() {
-  openModal({ title: "新增評量", subtitle: "評量權重用來換算學期表現，可稍後調整。", body: `<form><div class="form-grid"><label class="field full-field">評量名稱<input name="name" required placeholder="例如：酸鹼指示劑實驗"></label><label class="field">類型<select name="type"><option>形成性</option><option>實作</option><option>總結性</option></select></label><label class="field">日期<input name="date" type="date" value="${dateKey()}"></label><label class="field">滿分<input name="maxScore" type="number" min="1" value="20" required></label><label class="field">權重（%）<input name="weight" type="number" min="0" max="100" value="10" required></label></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">建立評量</button></div></form>`, onReady(modal, close) { modal.querySelector("[data-close]").onclick = close; modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget), id = uniqueId("assessment"); store.update(draft => { draft.assessments.push({ id, name: String(data.get("name")), type: String(data.get("type")), date: String(data.get("date")), maxScore: Number(data.get("maxScore")), weight: Number(data.get("weight")) }); activeStudents(draft).forEach(student => { draft.scores[student.id] ||= {}; draft.scores[student.id][id] = null; }); }); close(); initGrades(); toast("評量已建立，可直接輸入成績。"); }; }});
+function showAssessmentModal(assessmentId = "") {
+  const state = store.get();
+  const existing = state.assessments.find(item => item.id === assessmentId);
+  const types = ["形成性", "實作", "總結性"];
+  openModal({
+    title: existing ? "編輯評量" : "新增評量",
+    subtitle: existing ? "調整滿分不會換算既有成績，超過滿分的分數會被標示為異常。" : "評量權重用來換算學期表現，可稍後調整。",
+    body: `<form><div class="form-grid"><label class="field full-field">評量名稱<input name="name" required placeholder="例如：酸鹼指示劑實驗" value="${esc(existing?.name || "")}"></label><label class="field">類型<select name="type">${types.map(type => `<option${type === (existing?.type || "形成性") ? " selected" : ""}>${type}</option>`).join("")}</select></label><label class="field">日期<input name="date" type="date" value="${esc(existing?.date || dateKey())}"></label><label class="field">滿分<input name="maxScore" type="number" min="1" value="${existing?.maxScore ?? 20}" required></label><label class="field">權重（%）<input name="weight" type="number" min="0" max="100" value="${existing?.weight ?? 10}" required></label></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">${existing ? "儲存變更" : "建立評量"}</button></div></form>`,
+    onReady(modal, close) {
+      modal.querySelector("[data-close]").onclick = close;
+      modal.querySelector("form").onsubmit = event => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        const fields = { name: String(data.get("name")), type: String(data.get("type")), date: String(data.get("date")), maxScore: Number(data.get("maxScore")), weight: Number(data.get("weight")) };
+        store.update(draft => {
+          if (existing) {
+            Object.assign(draft.assessments.find(item => item.id === assessmentId), fields);
+            return;
+          }
+          const id = uniqueId("assessment");
+          draft.assessments.push({ id, ...fields });
+          activeStudents(draft).forEach(student => { draft.scores[student.id] ||= {}; draft.scores[student.id][id] = null; });
+        });
+        close();
+        initGrades();
+        toast(existing ? "評量已更新。" : "評量已建立，可直接輸入成績。");
+      };
+    }
+  });
+}
+
+function duplicateAssessment(assessmentId) {
+  const source = store.get().assessments.find(item => item.id === assessmentId);
+  if (!source) return;
+  const id = uniqueId("assessment");
+  store.update(draft => {
+    const index = draft.assessments.findIndex(item => item.id === assessmentId);
+    draft.assessments.splice(index + 1, 0, { ...source, id, name: `${source.name}（複製）`, date: dateKey() });
+    activeStudents(draft).forEach(student => { draft.scores[student.id] ||= {}; draft.scores[student.id][id] = null; });
+  });
+  initGrades();
+  toast("已複製評量設定，成績留空待輸入。");
+}
+
+function deleteAssessment(assessmentId) {
+  const state = store.get();
+  const assessment = state.assessments.find(item => item.id === assessmentId);
+  if (!assessment) return;
+  const withScores = state.students.filter(student => {
+    const value = state.scores[student.id]?.[assessmentId];
+    return value !== null && value !== undefined && value !== "";
+  }).length;
+  if (!confirm(`確定刪除「${assessment.name}」？\n這會一併清除全部班級共 ${withScores} 筆已輸入的成績，且無法復原。`)) return;
+  store.update(draft => {
+    draft.assessments = draft.assessments.filter(item => item.id !== assessmentId);
+    Object.values(draft.scores).forEach(map => delete map[assessmentId]);
+    Object.values(draft.scoreStatus || {}).forEach(map => delete map[assessmentId]);
+  });
+  initGrades();
+  toast("評量與相關成績已刪除。");
+}
+
+/* ------------------------------------------------------------- 成績匯入 */
+
+let lastScoreImport = null;
+
+function downloadScoreTemplate() {
+  const state = store.get();
+  const rows = [["座號", "分數"], ...activeStudents(state).map(student => [student.seat, ""])];
+  download(`${activeClass(state).code}-成績匯入範本.csv`, `﻿${rows.map(row => row.map(csvEscape).join(",")).join("\n")}`, "text/csv;charset=utf-8");
+  toast("匯入範本已下載，填好分數再匯入即可。");
+}
+
+/** 從 CSV 解析出「座號 → 分數」的原始列，容許有無標題列與常見欄名。 */
+function parseScoreRows(text) {
+  const table = parseCsv(text).filter(row => row.some(cell => String(cell).trim() !== ""));
+  if (!table.length) return [];
+  const header = table[0].map(cell => String(cell).trim());
+  const looksLikeHeader = header.some(cell => /座號|seat|號碼|分數|score|成績/i.test(cell)) && !/^\d+$/.test(header[0]);
+  const body = looksLikeHeader ? table.slice(1) : table;
+  let seatIndex = 0;
+  let scoreIndex = 1;
+  if (looksLikeHeader) {
+    const found = header.findIndex(cell => /座號|seat|號碼/i.test(cell));
+    const foundScore = header.findIndex(cell => /分數|score|成績/i.test(cell));
+    if (found >= 0) seatIndex = found;
+    if (foundScore >= 0) scoreIndex = foundScore;
+  }
+  return body.map((row, index) => ({ line: index + (looksLikeHeader ? 2 : 1), seat: String(row[seatIndex] ?? "").trim(), score: String(row[scoreIndex] ?? "").trim() }));
+}
+
+/** 把原始列比對到目前班級的學生，並判定每一列的狀態。 */
+function buildImportPlan(rows, assessment, state) {
+  const students = activeStudents(state);
+  const bySeat = new Map(students.map(student => [String(student.seat), student]));
+  const seenSeats = new Set();
+  return rows.map(row => {
+    const student = bySeat.get(String(Number(row.seat)));
+    const current = state.scores[student?.id]?.[assessment.id];
+    const hasCurrent = current !== null && current !== undefined && current !== "";
+    const item = { ...row, student, current: hasCurrent ? Number(current) : null, value: null, status: "", note: "", include: true };
+    if (!row.seat) { item.status = "invalid"; item.note = "缺少座號"; item.include = false; return item; }
+    if (!student) { item.status = "invalid"; item.note = `找不到座號 ${row.seat}`; item.include = false; return item; }
+    if (seenSeats.has(String(student.seat))) { item.status = "invalid"; item.note = "座號重複，僅保留第一筆"; item.include = false; return item; }
+    seenSeats.add(String(student.seat));
+    if (row.score === "") { item.status = "blank"; item.note = "未填分數，略過"; item.include = false; return item; }
+    if (/^(缺考|缺|absent)$/i.test(row.score)) { item.status = "absent"; item.note = "標記為缺考"; return item; }
+    const value = Number(row.score);
+    if (Number.isNaN(value)) { item.status = "invalid"; item.note = `非數值：${row.score}`; item.include = false; return item; }
+    if (value < 0 || value > assessment.maxScore) { item.status = "invalid"; item.note = `超出 0–${assessment.maxScore}`; item.include = false; return item; }
+    item.value = value;
+    if (!hasCurrent) item.status = "new";
+    else if (Number(current) === value) { item.status = "same"; item.note = "與目前相同"; }
+    else item.status = "overwrite";
+    return item;
+  });
+}
+
+function showScoreImportModal() {
+  const state = store.get();
+  if (!state.assessments.length) return toast("請先建立至少一項評量。", "error");
+  const options = state.assessments.map(item => `<option value="${item.id}">${esc(item.name)}（滿分 ${item.maxScore}）</option>`).join("");
+  openModal({
+    title: "匯入成績",
+    subtitle: `以座號對應 ${activeClass(state).name} 的學生；匯入前會先顯示比對結果。`,
+    className: "large",
+    body: `<form id="score-import-form"><div class="form-grid"><label class="field full-field">匯入到哪一項評量<select name="assessmentId">${options}</select></label><label class="field full-field">CSV 檔案<input name="file" type="file" accept=".csv,text/csv" required></label></div><p class="muted">欄位為「座號, 分數」；分數填「缺考」可直接標記缺考。可先下載匯入範本。</p><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">讀取並預覽</button></div></form>`,
+    onReady(modal, close) {
+      modal.querySelector("[data-close]").onclick = close;
+      modal.querySelector("form").onsubmit = async event => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        const assessmentId = String(data.get("assessmentId"));
+        const file = data.get("file");
+        if (!file || !file.size) return toast("請選擇 CSV 檔案。", "error");
+        try {
+          const rows = parseScoreRows(await file.text());
+          if (!rows.length) return toast("檔案沒有可讀取的資料列。", "error");
+          close();
+          showImportPreview(assessmentId, rows);
+        } catch (error) {
+          toast(error.message || "無法讀取檔案。", "error");
+        }
+      };
+    }
+  });
+}
+
+function showImportPreview(assessmentId, rows) {
+  const state = store.get();
+  const assessment = state.assessments.find(item => item.id === assessmentId);
+  const plan = buildImportPlan(rows, assessment, state);
+  const labels = { new: "新增", overwrite: "覆蓋", same: "不變", absent: "缺考", blank: "略過", invalid: "問題" };
+
+  const summaryOf = current => {
+    const included = current.filter(item => item.include);
+    return {
+      matched: current.filter(item => item.student).length,
+      willWrite: included.length,
+      overwrite: included.filter(item => item.status === "overwrite").length,
+      invalid: current.filter(item => item.status === "invalid").length,
+      absent: included.filter(item => item.status === "absent").length
+    };
+  };
+
+  const renderSummary = current => {
+    const sum = summaryOf(current);
+    return `<div class="import-summary"><span><strong>${sum.matched}</strong>筆對應到學生</span><span><strong>${sum.willWrite}</strong>筆將寫入</span><span class="${sum.overwrite ? "is-warn" : ""}"><strong>${sum.overwrite}</strong>筆覆蓋既有成績</span><span class="${sum.invalid ? "is-bad" : ""}"><strong>${sum.invalid}</strong>筆有問題</span><span><strong>${sum.absent}</strong>筆標記缺考</span></div>${sum.overwrite ? `<div class="notice import-warn"><strong>將覆蓋 ${sum.overwrite} 筆已輸入的成績</strong><span>確認後可用「復原這次匯入」退回。</span></div>` : ""}`;
+  };
+
+  const renderRows = current => current.map((item, index) => `<tr class="is-${item.status}"><td>${item.status === "invalid" || item.status === "blank" ? "" : `<input type="checkbox" data-row="${index}" ${item.include ? "checked" : ""} aria-label="是否匯入第 ${item.line} 列">`}</td><td>${esc(item.seat || "—")}</td><td>${esc(item.student?.number || "—")}</td><td>${item.current ?? "—"}</td><td>${item.status === "absent" ? "缺考" : item.value ?? "—"}</td><td><span class="import-tag t-${item.status}">${labels[item.status]}</span>${item.note ? `<small>${esc(item.note)}</small>` : ""}</td></tr>`).join("");
+
+  openModal({
+    title: "匯入預覽",
+    subtitle: `${assessment.name}（滿分 ${assessment.maxScore}）｜${activeClass(state).name}`,
+    className: "large",
+    body: `<div id="import-summary">${renderSummary(plan)}</div><div class="table-wrap import-table"><table class="data-table"><thead><tr><th>匯入</th><th>座號</th><th>學生編號</th><th>目前</th><th>檔案</th><th>狀態</th></tr></thead><tbody id="import-rows">${renderRows(plan)}</tbody></table></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button type="button" class="btn btn-primary" data-confirm-import>確認匯入</button></div>`,
+    onReady(modal, close) {
+      const refresh = () => { modal.querySelector("#import-summary").innerHTML = renderSummary(plan); };
+      modal.querySelector("[data-close]").onclick = close;
+      modal.querySelectorAll("[data-row]").forEach(box => box.onchange = () => { plan[Number(box.dataset.row)].include = box.checked; refresh(); });
+      modal.querySelector("[data-confirm-import]").onclick = () => {
+        const applied = plan.filter(item => item.include && item.student);
+        if (!applied.length) return toast("沒有可匯入的資料列。", "error");
+        applyScoreImport(assessmentId, applied);
+        close();
+      };
+    }
+  });
+}
+
+function applyScoreImport(assessmentId, applied) {
+  const state = store.get();
+  const undo = applied.map(item => ({
+    studentId: item.student.id,
+    score: state.scores[item.student.id]?.[assessmentId] ?? null,
+    status: scoreStatusOf(item.student.id, assessmentId, state)
+  }));
+  store.update(draft => {
+    applied.forEach(item => {
+      draft.scores[item.student.id] ||= {};
+      if (item.status === "absent") {
+        draft.scores[item.student.id][assessmentId] = null;
+        setScoreStatus(draft, item.student.id, assessmentId, "absent");
+        return;
+      }
+      draft.scores[item.student.id][assessmentId] = item.value;
+      setScoreStatus(draft, item.student.id, assessmentId, "");
+    });
+  });
+  const assessment = store.get().assessments.find(item => item.id === assessmentId);
+  lastScoreImport = { assessmentId, name: assessment?.name || "", at: new Date().toISOString(), undo };
+  initGrades();
+  toast(`已匯入 ${applied.length} 筆成績到「${assessment?.name}」。`);
+}
+
+function renderImportUndo() {
+  const banner = $("#import-undo");
+  if (!banner) return;
+  banner.hidden = !lastScoreImport;
+  if (!lastScoreImport) return;
+  banner.innerHTML = `<strong>已匯入 ${lastScoreImport.undo.length} 筆到「${esc(lastScoreImport.name)}」</strong><span>如果匯錯了可以退回匯入前的狀態。</span><button class="btn btn-light" data-action="undo-import">復原這次匯入</button>`;
+  banner.querySelector('[data-action="undo-import"]').onclick = () => {
+    const snapshot = lastScoreImport;
+    store.update(draft => {
+      snapshot.undo.forEach(entry => {
+        draft.scores[entry.studentId] ||= {};
+        draft.scores[entry.studentId][snapshot.assessmentId] = entry.score;
+        setScoreStatus(draft, entry.studentId, snapshot.assessmentId, entry.status);
+      });
+    });
+    lastScoreImport = null;
+    initGrades();
+    toast("已復原這次匯入。");
+  };
 }
 
 function exportGrades() {
-  const state = store.get(); const currentClass = activeClass(state); const rows = [["學生編號", "座號", ...state.assessments.map(item => `${item.name}（/${item.maxScore}）`), "加權平均"], ...activeStudents(state).map(student => [student.number, student.seat, ...state.assessments.map(item => state.scores[student.id]?.[item.id] ?? ""), studentAverage(student.id, state)?.toFixed(1) || ""])]; download(`${currentClass.code}-自然科成績簿-${dateKey()}.csv`, "\ufeff" + rows.map(row => row.map(csvEscape).join(",")).join("\n"), "text/csv;charset=utf-8"); toast("成績簿已匯出。");
+  const state = store.get(); const currentClass = activeClass(state); const rows = [["學生編號", "座號", ...state.assessments.map(item => `${item.name}（/${item.maxScore}）`), "加權平均"], ...activeStudents(state).map(student => [student.number, student.seat, ...state.assessments.map(item => { const raw = state.scores[student.id]?.[item.id]; const hasRaw = raw !== null && raw !== undefined && raw !== ""; if (hasRaw) return raw; return isAbsentExam(student.id, item.id, state) ? `缺考（${absentExamScore(item.id, state) ?? "—"}）` : ""; }), studentAverage(student.id, state)?.toFixed(1) || ""])]; download(`${currentClass.code}-自然科成績簿-${dateKey()}.csv`, "\ufeff" + rows.map(row => row.map(csvEscape).join(",")).join("\n"), "text/csv;charset=utf-8"); toast("成績簿已匯出。");
 }
 
 let timerState = { remaining: 300, initial: 300, running: false, interval: null };

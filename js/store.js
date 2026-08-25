@@ -111,6 +111,7 @@ function normalizeState(nextState) {
   nextState.rewards.ledger ||= [];
   nextState.rewards.menu = normalizeRewardMenu(nextState.rewards.menu);
   nextState.scores ||= {};
+  nextState.scoreStatus ||= {};
   nextState.attendance ||= {};
   nextState.attendanceLog ||= [];
   nextState.observations ||= [];
@@ -166,6 +167,7 @@ export const createDemoState = () => {
     attendance: {
       [todayKey()]: Object.fromEntries(students.map(student => [student.id, student.seat === 15 ? "late" : student.seat === 17 ? "absent" : "present"]))
     },
+    scoreStatus: {},
     attendanceLog: [],
     observations: [],
     rewards: { ledger: buildLedger(students), menu: defaultRewardMenu.map(item => ({ ...item })) },
@@ -321,13 +323,65 @@ export function studentPoints(studentId, current = state) {
   return current.rewards.ledger.filter(entry => entry.studentId === studentId).reduce((total, entry) => total + Number(entry.value || 0), 0);
 }
 
+/* -------------------------------------------------------------- 成績與缺考 */
+
+/** 缺考扣分：以實際應考同學的平均再減 5 分。 */
+export const ABSENT_PENALTY = 5;
+
+export function scoreStatusOf(studentId, assessmentId, current = state) {
+  return current.scoreStatus?.[studentId]?.[assessmentId] || "";
+}
+
+export function isAbsentExam(studentId, assessmentId, current = state) {
+  return scoreStatusOf(studentId, assessmentId, current) === "absent";
+}
+
+/**
+ * 該評量「實際應考學生」的平均原始分數。
+ * 刻意排除缺考者與未輸入者，否則缺考推算出來的分數會回頭影響平均。
+ */
+export function assessmentRawMean(assessmentId, current = state) {
+  const values = activeStudents(current)
+    .filter(student => !isAbsentExam(student.id, assessmentId, current))
+    .map(student => current.scores[student.id]?.[assessmentId])
+    .filter(value => value !== null && value !== undefined && value !== "")
+    .map(Number);
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+/** 缺考學生的推算分數；沒有任何人有成績時回傳 null。 */
+export function absentExamScore(assessmentId, current = state) {
+  const assessment = current.assessments.find(item => item.id === assessmentId);
+  const mean = assessmentRawMean(assessmentId, current);
+  if (!assessment || mean === null) return null;
+  return Math.min(assessment.maxScore, Math.max(0, Number((mean - ABSENT_PENALTY).toFixed(1))));
+}
+
+/**
+ * 計分時實際採用的分數。
+ * 缺考且教師未手動填分時採「應考平均 −5」，會隨其他人成績變動自動重算；
+ * 只要教師填了分數就以填入的為準（等同補考登記）。
+ */
+export function effectiveScore(studentId, assessmentId, current = state) {
+  const raw = current.scores[studentId]?.[assessmentId];
+  if (raw !== null && raw !== undefined && raw !== "") return Number(raw);
+  if (isAbsentExam(studentId, assessmentId, current)) return absentExamScore(assessmentId, current);
+  return null;
+}
+
+export function setScoreStatus(draft, studentId, assessmentId, status) {
+  draft.scoreStatus ||= {};
+  draft.scoreStatus[studentId] ||= {};
+  if (status) draft.scoreStatus[studentId][assessmentId] = status;
+  else delete draft.scoreStatus[studentId][assessmentId];
+}
+
 export function studentAverage(studentId, current = state) {
-  const scoreMap = current.scores[studentId] || {};
   let weighted = 0;
   let totalWeight = 0;
   current.assessments.forEach(assessment => {
-    const score = scoreMap[assessment.id];
-    if (score === null || score === undefined || score === "") return;
+    const score = effectiveScore(studentId, assessment.id, current);
+    if (score === null || score === undefined) return;
     weighted += (Number(score) / assessment.maxScore) * assessment.weight;
     totalWeight += assessment.weight;
   });
@@ -339,11 +393,16 @@ export function classAverage(current = state) {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 }
 
+/** 該評量的班級平均百分比，以實際應考學生計算。 */
 export function assessmentAverage(assessmentId, current = state) {
   const assessment = current.assessments.find(item => item.id === assessmentId);
-  if (!assessment) return 0;
-  const values = activeStudents(current).map(student => current.scores[student.id]?.[assessmentId]).filter(value => value !== null && value !== undefined && value !== "");
-  return values.length ? values.reduce((sum, value) => sum + Number(value), 0) / values.length / assessment.maxScore * 100 : 0;
+  const mean = assessmentRawMean(assessmentId, current);
+  return assessment && mean !== null ? mean / assessment.maxScore * 100 : 0;
+}
+
+/** 權重總和，用於提醒教師是否湊滿 100%。 */
+export function totalWeight(current = state) {
+  return (current.assessments || []).reduce((sum, item) => sum + Number(item.weight || 0), 0);
 }
 
 export function uniqueId(prefix = "id") {

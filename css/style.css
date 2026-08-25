@@ -479,6 +479,9 @@ tr.is-inactive .avatar { background: var(--line); color: var(--muted); }
 .integration-card { display: grid; grid-template-columns: 56px 1fr; gap: 1rem; }
 .integration-logo { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 16px; font-size: 1.5rem; font-weight: 800; }
 .google-logo { color: #4285f4; background: #eef4ff; }
+.firebase-logo { color: #d97706; background: #fff7e6; }
+.account-detail { display: grid; gap: .15rem; margin: .6rem 0 0; padding: .6rem .75rem; border-radius: 12px; background: var(--forest-50); font-size: .82rem; }
+.account-detail small { color: var(--muted); font-size: .72rem; }
 .integration-main > p { color: var(--muted); font-size: .84rem; }
 .status-pill { display: inline-flex; align-items: center; gap: .4rem; padding: .35rem .65rem; border-radius: 999px; font-size: .7rem; font-weight: 700; }
 .status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; }

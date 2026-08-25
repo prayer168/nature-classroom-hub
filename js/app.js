@@ -2,6 +2,7 @@ import { renderChrome } from "./chrome.js";
 import { store, activeClass, activeStudents, inactiveStudents, deletedStudents, occupiedSeats, freeSeats, transferStudent, setStudentSeat, activeLesson, activeGrade, visibleResources, resourceScopes, RESOURCE_SCOPE_ALL, studentNumberFor, getTodayAttendance, attendanceDatesInMonth, attendanceAdjustedOn, setAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, totalWeight, effectiveScore, isAbsentExam, absentExamScore, scoreStatusOf, setScoreStatus, ABSENT_PENALTY, uniqueId, dateKey } from "./store.js";
 import { saveFile, getFile, deleteFile } from "./resource-db.js";
 import QRCode from "qrcode";
+import { isFirebaseConfigured } from "./firebase-config.js";
 import { pingGoogle, syncToGoogle, fetchGoogleBackup, uploadFileToGoogle, createGoogleDocReport, createStudentGoogleDocReport, diagnoseGoogle, selfTestGoogle, isValidAppsScriptUrl, compareScriptVersion, EXPECTED_SCRIPT_VERSION } from "./google-bridge.js";
 
 const page = document.body.dataset.page;
@@ -14,6 +15,20 @@ const formatDay = value => new Intl.DateTimeFormat("zh-TW", { year: "numeric", m
 const statusLabel = { present: "到課", absent: "缺席", late: "遲到" };
 
 renderChrome();
+
+/**
+ * Firebase SDK 有 200 KB 以上（gzip），每頁都載入太重。
+ * 只在「設定頁」或「這台裝置登入過」時才動態載入雲端模組。
+ */
+const CLOUD_ACTIVE_KEY = "nature-classroom-hub:cloud-active";
+let cloudModulePromise = null;
+function loadCloud() {
+  cloudModulePromise ||= import("./cloud.js");
+  return cloudModulePromise;
+}
+if (isFirebaseConfigured && (page === "settings" || localStorage.getItem(CLOUD_ACTIVE_KEY) === "1")) {
+  loadCloud().then(cloud => cloud.initCloud()).catch(error => console.warn("無法載入雲端模組", error));
+}
 
 function toast(message, type = "success") {
   const region = $("#toast-region");
@@ -1347,6 +1362,7 @@ function initSettings() {
   const state = store.get(); $("#apps-script-url").value = state.settings.appsScriptUrl || ""; $("#private-observations").checked = state.settings.privateObservations; $("#positive-only").checked = state.settings.positiveOnly; $("#confirm-delete").checked = state.settings.confirmDelete; updateGoogleStatus();
   $('[data-action="save-integration"]').onclick = async () => { const url = $("#apps-script-url").value.trim(); if (!isValidAppsScriptUrl(url)) return toast("網址格式不符，請貼上以 /exec 結尾的 Apps Script Web App 網址。", "error"); try { toast("正在測試 Google 連線…"); const result = await pingGoogle(url); store.update(draft => { draft.settings.appsScriptUrl = url; }); updateGoogleStatus(); renderPingResult(result); toast(compareScriptVersion(result.scriptVersion) < 0 ? `連線成功，但 Apps Script 仍是舊版 ${result.scriptVersion || "未知"}，請重新部署。` : "Google 串接設定成功。", compareScriptVersion(result.scriptVersion) < 0 ? "error" : "success"); } catch (error) { toast(`測試失敗：${error.message}`, "error"); renderDiagnostics([{ ok: false, label: "連線測試", detail: error.message }], { ok: false }); } };
   initDiagnostics();
+  initAccountCard();
   $('[data-action="sync-now"]').onclick = async () => { try { toast("正在同步資料…"); await syncToGoogle(); updateGoogleStatus(); toast("資料已同步到 Google Sheets。"); } catch (error) { toast(error.message, "error"); } };
   $('[data-action="export-backup"]').onclick = () => { download(`自然課堂中控站備份-${dateKey()}.json`, JSON.stringify(store.get(), null, 2), "application/json"); toast("完整 JSON 備份已下載。"); };
   $('[data-action="restore-google"]').onclick = async () => { if (!confirm("從 Google 還原會覆蓋目前的本機班級資料，是否繼續？")) return; try { toast("正在讀取 Google 最新備份…"); const result = await fetchGoogleBackup(); store.replace(result.payload); initSettings(); toast("已從 Google Drive 最新備份還原。"); } catch (error) { toast(error.message, "error"); } };
@@ -1356,6 +1372,61 @@ function initSettings() {
 }
 
 function updateGoogleStatus() { const state = store.get(), connected = Boolean(state.settings.appsScriptUrl); $("#google-status").textContent = connected ? "已設定" : "尚未連接"; $("#google-status").className = `status-pill ${connected ? "status-connected" : "status-local"}`; $("#last-sync").textContent = state.settings.lastSyncAt ? `最後成功同步：${formatDate(state.settings.lastSyncAt)}` : "尚無成功同步紀錄。"; }
+
+async function initAccountCard() {
+  const card = $("#account-card");
+  if (!card) return;
+  if (!isFirebaseConfigured) {
+    // 尚未填 Firebase 設定時完全不顯示，避免出現按了沒反應的登入按鈕。
+    card.hidden = true;
+    return;
+  }
+  const cloud = await loadCloud();
+  card.hidden = false;
+  const busy = async (action, label) => {
+    try { toast(`${label}中…`); await action(); toast(`${label}完成。`); }
+    catch (error) { toast(error.message || `${label}失敗。`, "error"); }
+  };
+  card.querySelector('[data-action="cloud-sign-in"]').onclick = () => busy(cloud.signIn, "登入");
+  card.querySelector('[data-action="cloud-sign-out"]').onclick = () => busy(cloud.signOutCloud, "登出");
+  card.querySelector('[data-action="cloud-push"]').onclick = () => busy(cloud.forcePush, "上傳");
+  card.querySelector('[data-action="cloud-pull"]').onclick = () => busy(cloud.forcePull, "下載");
+  cloudResolver = cloud.resolveInitialSync;
+  cloud.onCloudState(renderAccountCard);
+}
+
+let cloudResolver = null;
+
+function renderAccountCard(cloud) {
+  const card = $("#account-card");
+  if (!card || !cloud.enabled) return;
+  const signedIn = Boolean(cloud.user);
+  $("#account-status").textContent = !cloud.ready ? "檢查登入狀態…" : signedIn ? "已登入" : "未登入";
+  $("#account-status").className = `status-pill ${signedIn ? "status-connected" : "status-local"}`;
+  card.querySelector('[data-action="cloud-sign-in"]').hidden = signedIn;
+  ["cloud-sign-out", "cloud-push", "cloud-pull"].forEach(action => { card.querySelector(`[data-action="${action}"]`).hidden = !signedIn; });
+
+  const detail = $("#account-detail");
+  detail.hidden = !signedIn;
+  if (signedIn) {
+    detail.innerHTML = `<strong>${esc(cloud.user.email || "")}</strong><small>${cloud.lastSyncedAt ? `最後同步：${formatDate(cloud.lastSyncedAt)}` : "尚未同步"}</small>`;
+  }
+
+  const resolution = $("#cloud-resolution");
+  resolution.hidden = !cloud.pendingResolution;
+  if (cloud.pendingResolution) {
+    const { cloudUpdatedAt, localUpdatedAt } = cloud.pendingResolution;
+    resolution.innerHTML = `<strong>雲端與這台裝置都有資料，請選擇要保留哪一份</strong><span>雲端最後更新：${cloudUpdatedAt ? formatDate(cloudUpdatedAt) : "未知"}；這台裝置：${localUpdatedAt ? formatDate(localUpdatedAt) : "未知"}。另一份會被覆蓋，建議先「下載 JSON 備份」再選。</span><div class="button-row"><button class="btn btn-primary" data-choose="cloud">改用雲端資料</button><button class="btn btn-light" data-choose="local">保留這台裝置並覆蓋雲端</button></div>`;
+    resolution.querySelectorAll("[data-choose]").forEach(button => button.onclick = async () => {
+      try {
+        toast("處理中…");
+        await cloudResolver(button.dataset.choose);
+        initSettings();
+        toast(button.dataset.choose === "cloud" ? "已改用雲端資料。" : "已把這台裝置的資料上傳為雲端版本。");
+      } catch (error) { toast(error.message || "處理失敗。", "error"); }
+    });
+  }
+}
 
 let lastDiagnosticsReport = "";
 

@@ -6,6 +6,8 @@ const pages = ["index", "classroom", "students", "attendance", "rewards", "grade
 export default defineConfig({
   base: "./",
   build: {
+    // Firebase SDK 本身就有 600 KB，且已切成只在需要時載入的獨立 chunk。
+    chunkSizeWarningLimit: 700,
     rollupOptions: {
       input: {
         ...Object.fromEntries(pages.map(page => [page, resolve(import.meta.dirname, `${page}.html`)])),

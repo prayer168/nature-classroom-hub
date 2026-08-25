@@ -233,7 +233,7 @@ export const createDemoState = () => {
       { id: "link-junyi", name: "均一教育平台", category: "連結", type: "link", url: "https://www.junyiacademy.org/", size: 0, grade: RESOURCE_SCOPE_ALL, createdAt: nowIso(), tags: ["任務", "學習資源"] }
     ],
     toolHistory: { recentlyPicked: [] },
-    settings: { appsScriptUrl: "", lastSyncAt: null, privateObservations: true, positiveOnly: true, confirmDelete: true },
+    settings: { appsScriptUrl: "", lastSyncAt: null, cloudSyncedAt: null, privateObservations: true, positiveOnly: true, confirmDelete: true },
     updatedAt: nowIso()
   };
 };

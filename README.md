@@ -43,6 +43,10 @@ npm run preview
 
 產物會輸出至 `dist/`。推送到 `main` 後，GitHub Actions 會自動部署到 GitHub Pages，也可再嵌入 Google Sites。
 
+## 登入與雲端資料庫
+
+依 [Firebase 登入與雲端資料庫設定](docs/firebase-setup.md) 建立 Firebase 專案並填入 `js/firebase-config.js`，即可啟用 Google 登入與跨裝置同步。未設定前維持純本機模式。
+
 ## Google 串接
 
 請依 [Google Workspace 串接指南](docs/google-integration.md) 部署 `integrations/apps-script/Code.gs`（目前 `SCRIPT_VERSION = 2.1.0`）。未完成 Google 授權前，系統會保持本機模式，不會聲稱資料已同步。

@@ -6,11 +6,15 @@ const nowIso = () => new Date().toISOString();
 export const classDefinitions = [
   { id: "c402", code: "402", name: "402 班", grade: "四年級", subject: "自然科學", schoolYear: "115 學年度" },
   { id: "c403", code: "403", name: "403 班", grade: "四年級", subject: "自然科學", schoolYear: "115 學年度" },
-  { id: "c501", code: "501", name: "501 班", grade: "五年級", subject: "自然科學", schoolYear: "115 學年度" },
-  { id: "c502", code: "502", name: "502 班", grade: "五年級", subject: "自然科學", schoolYear: "115 學年度" },
-  { id: "c503", code: "503", name: "503 班", grade: "五年級", subject: "自然科學", schoolYear: "115 學年度" },
-  { id: "c508", code: "508", name: "508 班", grade: "五年級", subject: "自然科學", schoolYear: "115 學年度" }
+  { id: "c601", code: "601", name: "601 班", grade: "六年級", subject: "自然科學", schoolYear: "115 學年度" },
+  { id: "c602", code: "602", name: "602 班", grade: "六年級", subject: "自然科學", schoolYear: "115 學年度" },
+  { id: "c603", code: "603", name: "603 班", grade: "六年級", subject: "自然科學", schoolYear: "115 學年度" },
+  { id: "c608", code: "608", name: "608 班", grade: "六年級", subject: "自然科學", schoolYear: "115 學年度" }
 ];
+
+/** 舊的五年級班級對應到現在的六年級班級；載入舊資料時自動轉換並重新編號。 */
+const CLASS_MIGRATION = { c501: "c601", c502: "c602", c503: "c603", c508: "c608" };
+const GRADE_MIGRATION = { 五年級: "六年級" };
 
 /** 資源庫的適用範圍：通用資源在所有班級都看得到，年級資源只在該年級的班級出現。 */
 export const RESOURCE_SCOPE_ALL = "通用";
@@ -85,6 +89,21 @@ function normalizeRewardMenu(menu = []) {
 function normalizeState(nextState) {
   nextState.version = 2;
   nextState.classes = classDefinitions.map(item => ({ ...item }));
+
+  // 五年級改制為六年級：舊班級 id 先轉成新的，之後編號才會跟著重算。
+  if (CLASS_MIGRATION[nextState.activeClassId]) nextState.activeClassId = CLASS_MIGRATION[nextState.activeClassId];
+  if (nextState.lessons) {
+    Object.entries(CLASS_MIGRATION).forEach(([oldId, newId]) => {
+      if (nextState.lessons[oldId] && !nextState.lessons[newId]) nextState.lessons[newId] = nextState.lessons[oldId];
+      delete nextState.lessons[oldId];
+    });
+  }
+  (nextState.transferLog || []).forEach(entry => {
+    entry.fromClassId = CLASS_MIGRATION[entry.fromClassId] || entry.fromClassId;
+    entry.toClassId = CLASS_MIGRATION[entry.toClassId] || entry.toClassId;
+  });
+  (nextState.resources || []).forEach(item => { if (GRADE_MIGRATION[item.grade]) item.grade = GRADE_MIGRATION[item.grade]; });
+
   if (!classDefinitions.some(item => item.id === nextState.activeClassId)) nextState.activeClassId = "c402";
 
   // 課程單元依班級各自獨立；1.3.0 以前只有單一 lesson，載入時複製給每個班級當起點。
@@ -103,8 +122,10 @@ function normalizeState(nextState) {
     grade: resourceScopes.includes(item.grade) ? item.grade : RESOURCE_SCOPE_ALL
   }));
   nextState.students = (nextState.students || []).map(student => {
-    const classInfo = classDefinitions.find(item => item.id === student.classId) || classDefinitions[0];
-    const number = student.number || studentNumberFor(classInfo.code, student.seat);
+    const migratedClassId = CLASS_MIGRATION[student.classId];
+    const classInfo = classDefinitions.find(item => item.id === (migratedClassId || student.classId)) || classDefinitions[0];
+    // 轉制的學生要重新編號（5101 → 6101）；student.id 維持不變，成績與出席才不會斷開。
+    const number = migratedClassId ? studentNumberFor(classInfo.code, student.seat) : (student.number || studentNumberFor(classInfo.code, student.seat));
     return { ...student, id: student.id || `stu-${number}`, number, name: `學生 ${number}`, classId: classInfo.id };
   });
   nextState.rewards ||= { ledger: [], menu: [] };
@@ -114,6 +135,7 @@ function normalizeState(nextState) {
   nextState.scoreStatus ||= {};
   nextState.attendance ||= {};
   nextState.attendanceLog ||= [];
+  nextState.transferLog ||= [];
   nextState.observations ||= [];
   return nextState;
 }
@@ -169,6 +191,7 @@ export const createDemoState = () => {
     },
     scoreStatus: {},
     attendanceLog: [],
+    transferLog: [],
     observations: [],
     rewards: { ledger: buildLedger(students), menu: defaultRewardMenu.map(item => ({ ...item })) },
     assessments: initialAssessments,
@@ -261,8 +284,56 @@ export function visibleResources(current = state) {
   return (current.resources || []).filter(item => item.grade === RESOURCE_SCOPE_ALL || item.grade === grade);
 }
 
+/** 目前班級的在籍學生：排除已停用與已刪除者。 */
 export function activeStudents(current = state) {
-  return current.students.filter(student => student.classId === current.activeClassId && student.active !== false);
+  return current.students.filter(student => student.classId === current.activeClassId && student.active !== false && !student.deletedAt);
+}
+
+/** 目前班級被停用的學生（保留歷史，不列入當前名單）。 */
+export function inactiveStudents(current = state) {
+  return current.students.filter(student => student.classId === current.activeClassId && student.active === false && !student.deletedAt);
+}
+
+/** 回收筒：所有班級被軟刪除的學生，最近刪除的排前面。 */
+export function deletedStudents(current = state) {
+  return current.students
+    .filter(student => student.deletedAt)
+    .sort((a, b) => String(b.deletedAt).localeCompare(String(a.deletedAt)));
+}
+
+/** 座號上限。預設一班 30 人，但轉入會讓班級暫時超過，所以留出餘裕。 */
+export const SEAT_LIMIT = 45;
+
+/** 該班已被占用的座號（含停用學生，避免號碼撞號）。 */
+export function occupiedSeats(classId, current = state, exceptStudentId = "") {
+  return new Set(current.students
+    .filter(student => student.classId === classId && !student.deletedAt && student.id !== exceptStudentId)
+    .map(student => Number(student.seat)));
+}
+
+/** 該班還空著的座號。滿 30 人時會往上開放 31 號以後，讓轉入不會卡死。 */
+export function freeSeats(classId, current = state, exceptStudentId = "") {
+  const taken = occupiedSeats(classId, current, exceptStudentId);
+  return Array.from({ length: SEAT_LIMIT }, (_, index) => index + 1).filter(seat => !taken.has(seat));
+}
+
+/**
+ * 轉班：學生本人與其所有紀錄一起搬到新班級，並改用新班級的編號。
+ * 成績、出席、點數與觀察都以 student.id 為鍵，因此不需搬動即自動跟隨。
+ */
+export function transferStudent(draft, studentId, toClassId, toSeat) {
+  const student = draft.students.find(item => item.id === studentId);
+  const target = classDefinitions.find(item => item.id === toClassId);
+  if (!student || !target) return null;
+  const fromClassId = student.classId;
+  const fromNumber = student.number;
+  const number = studentNumberFor(target.code, toSeat);
+  student.classId = target.id;
+  student.seat = Number(toSeat);
+  student.number = number;
+  draft.transferLog ||= [];
+  draft.transferLog.unshift({ id: uniqueId("mv"), studentId, fromClassId, toClassId, fromNumber, toNumber: number, at: nowIso() });
+  return { fromNumber, toNumber: number };
 }
 
 export function getTodayAttendance(current = state) {

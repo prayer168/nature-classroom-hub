@@ -1,7 +1,7 @@
 import { store } from "./store.js";
 
 /** 前端預期的 Apps Script 版本。Code.gs 的 SCRIPT_VERSION 低於此值代表使用者尚未重新部署。 */
-export const EXPECTED_SCRIPT_VERSION = "2.4.0";
+export const EXPECTED_SCRIPT_VERSION = "2.5.0";
 
 const DEFAULT_TIMEOUT = 30_000;
 const SYNC_TIMEOUT = 60_000;

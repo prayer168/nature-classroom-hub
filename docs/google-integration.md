@@ -2,8 +2,8 @@
 
 系統以 Google Apps Script Web App 作為前端與 Google Workspace 的橋接層：把班級資料同步到 Google Sheets、在 Drive 建立與還原 JSON 備份、上傳教學檔案，並用 Google Docs 產生班級或個別學生報告。部署後也可以直接嵌入 Google Sites。
 
-> **對應版本**：Apps Script `SCRIPT_VERSION = 2.4.0`，資料 schema v2。
-> 前端會在診斷時比對版本；若顯示「部署中的版本為 2.3.x」，代表 `Code.gs` 改過但沒有重新部署。
+> **對應版本**：Apps Script `SCRIPT_VERSION = 2.5.0`，資料 schema v2。
+> 前端會在診斷時比對版本；若顯示「部署中的版本為 2.4.x」，代表 `Code.gs` 改過但沒有重新部署。
 
 ---
 
@@ -126,12 +126,13 @@
 | Classes | 6 個班級的代碼、年級、科目、學年 |
 | Lessons | 各班獨立的課程單元、課次、今日任務與開始時間 |
 | AttendanceLog | 補改過去出席的稽核紀錄：修改時間、日期、學生與前後狀態 |
-| Students | 學生編號、座號、班級、標籤、備註（**不含姓名**） |
+| TransferLog | 轉班紀錄：學生、原班級、新班級、前後編號與時間 |
+| Students | 學生編號、座號、班級、標籤、備註、`deletedAt`（回收筒）（**不含姓名**） |
 | Attendance | 逐日逐生出席狀態 |
 | Rewards / RewardMenu | 點數紀錄與獎品目錄 |
 | Assessments / Scores | 評量定義與各生得分；`Scores.status` 為 `absent` 代表缺考 |
 | Observations | 教師觀察紀錄 |
-| Resources | 教學資源清單（連結與檔案中繼資料），`grade` 標示通用／四年級／五年級 |
+| Resources | 教學資源清單（連結與檔案中繼資料），`grade` 標示通用／四年級／六年級 |
 | Metadata | 同步時間、schema 版本、班級與學生數 |
 
 伺服器端會再做一次去識別化：即使前端誤送 `name`、`fullName`、`realName`，寫入 Sheets／Drive 備份／Docs 前都會剝除。

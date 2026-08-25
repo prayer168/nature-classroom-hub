@@ -15,7 +15,7 @@
  */
 
 const APP_NAME = '自然課堂中控站';
-const SCRIPT_VERSION = '2.4.0';
+const SCRIPT_VERSION = '2.5.0';
 const SCHEMA_VERSION = 2;
 
 const PROP_SHEET_ID = 'NATURE_HUB_SHEET_ID';
@@ -29,7 +29,8 @@ const PROP_LATEST_BACKUP_ID = 'NATURE_HUB_LATEST_BACKUP_ID';
 const SHEET_DEFINITIONS = {
   Classes: ['id', 'code', 'name', 'grade', 'subject', 'schoolYear'],
   Lessons: ['classId', 'topic', 'session', 'task', 'startedAt'],
-  Students: ['id', 'classId', 'number', 'seat', 'tags', 'note', 'active', 'createdAt'],
+  Students: ['id', 'classId', 'number', 'seat', 'tags', 'note', 'active', 'deletedAt', 'createdAt'],
+  TransferLog: ['id', 'studentId', 'fromClassId', 'toClassId', 'fromNumber', 'toNumber', 'at'],
   Attendance: ['date', 'studentId', 'status'],
   AttendanceLog: ['id', 'date', 'studentId', 'from', 'to', 'at'],
   Rewards: ['id', 'studentId', 'category', 'value', 'note', 'createdAt'],
@@ -173,6 +174,7 @@ function readSheetsSnapshot_(spreadsheet) {
     students: read('Students').map(student => ({ ...student, tags: String(student.tags || '').split(',').map(tag => tag.trim()).filter(String) })),
     attendance,
     attendanceLog: read('AttendanceLog'),
+    transferLog: read('TransferLog'),
     observations: read('Observations'),
     rewards: { ledger: read('Rewards'), menu: read('RewardMenu') },
     assessments: read('Assessments'),
@@ -415,6 +417,7 @@ function syncPayload_(payload) {
   });
   writeObjects_(spreadsheet, 'Attendance', attendanceRows);
   writeObjects_(spreadsheet, 'AttendanceLog', safePayload.attendanceLog || []);
+  writeObjects_(spreadsheet, 'TransferLog', safePayload.transferLog || []);
 
   writeObjects_(spreadsheet, 'Rewards', (safePayload.rewards && safePayload.rewards.ledger) || []);
   writeObjects_(spreadsheet, 'RewardMenu', (safePayload.rewards && safePayload.rewards.menu) || []);

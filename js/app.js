@@ -1,5 +1,5 @@
 import { renderChrome } from "./chrome.js";
-import { store, activeClass, activeStudents, activeLesson, activeGrade, visibleResources, resourceScopes, RESOURCE_SCOPE_ALL, studentNumberFor, getTodayAttendance, attendanceDatesInMonth, attendanceAdjustedOn, setAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, totalWeight, effectiveScore, isAbsentExam, absentExamScore, scoreStatusOf, setScoreStatus, ABSENT_PENALTY, uniqueId, dateKey } from "./store.js";
+import { store, activeClass, activeStudents, inactiveStudents, deletedStudents, occupiedSeats, freeSeats, transferStudent, activeLesson, activeGrade, visibleResources, resourceScopes, RESOURCE_SCOPE_ALL, studentNumberFor, getTodayAttendance, attendanceDatesInMonth, attendanceAdjustedOn, setAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, totalWeight, effectiveScore, isAbsentExam, absentExamScore, scoreStatusOf, setScoreStatus, ABSENT_PENALTY, uniqueId, dateKey } from "./store.js";
 import { saveFile, getFile, deleteFile } from "./resource-db.js";
 import QRCode from "qrcode";
 import { pingGoogle, syncToGoogle, fetchGoogleBackup, uploadFileToGoogle, createGoogleDocReport, createStudentGoogleDocReport, diagnoseGoogle, selfTestGoogle, isValidAppsScriptUrl, compareScriptVersion, EXPECTED_SCRIPT_VERSION } from "./google-bridge.js";
@@ -260,7 +260,9 @@ function initStudents() {
     const filter = $("#student-status-filter").value;
     const sort = $("#student-sort").value;
     const attendance = getTodayAttendance(state);
-    const students = activeStudents(state).filter(student => {
+    const showInactive = $("#show-inactive").checked;
+    const pool = showInactive ? [...activeStudents(state), ...inactiveStudents(state)] : activeStudents(state);
+    const students = pool.filter(student => {
       const matchesText = `${student.number} ${student.seat} ${student.tags.join(" ")}`.toLowerCase().includes(query);
       return matchesText && (filter === "all" || attendance[student.id] === filter);
     });
@@ -277,18 +279,27 @@ function initStudents() {
     $("#student-table-body").innerHTML = students.map(student => {
       const status = attendance[student.id] || "present";
       const average = studentAverage(student.id, state);
-      return `<tr><td><div class="student-cell"><span class="avatar">${student.seat}</span><div><strong>${esc(student.number)}</strong><small>${esc(currentClass.name)} · ${student.seat} 號</small></div></div></td><td><span class="badge ${status}">${statusLabel[status]}</span></td><td><strong>${studentPoints(student.id, state)}</strong> 點</td><td>${average === null ? "—" : `<strong>${average.toFixed(1)}</strong>`}</td><td>${student.tags.length ? student.tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join("") : '<span class="muted">—</span>'}</td><td><div class="row-actions"><button data-edit-student="${student.id}">編輯</button><button data-student-point="${student.id}">加點</button><button class="danger" data-delete-student="${student.id}">刪除</button></div></td></tr>`;
+      const inactive = student.active === false;
+      return `<tr class="${inactive ? "is-inactive" : ""}"><td><div class="student-cell"><span class="avatar">${student.seat}</span><div><strong>${esc(student.number)}</strong><small>${esc(currentClass.name)} · ${student.seat} 號${inactive ? " · 已停用" : ""}</small></div></div></td><td>${inactive ? '<span class="badge">停用</span>' : `<span class="badge ${status}">${statusLabel[status]}</span>`}</td><td><strong>${studentPoints(student.id, state)}</strong> 點</td><td>${average === null ? "—" : `<strong>${average.toFixed(1)}</strong>`}</td><td>${student.tags.length ? student.tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join("") : '<span class="muted">—</span>'}</td><td><div class="row-actions"><button data-edit-student="${student.id}">編輯</button><button data-student-point="${student.id}">加點</button><button data-transfer-student="${student.id}">轉班</button><button data-toggle-active="${student.id}">${inactive ? "恢復" : "停用"}</button><button class="danger" data-delete-student="${student.id}">刪除</button></div></td></tr>`;
     }).join("");
     $("#student-empty").hidden = students.length > 0;
     $$('[data-edit-student]').forEach(button => button.onclick = () => showStudentModal(button.dataset.editStudent));
     $$('[data-student-point]').forEach(button => button.onclick = () => showPointModalForOne(button.dataset.studentPoint));
+    $$('[data-transfer-student]').forEach(button => button.onclick = () => showTransferModal(button.dataset.transferStudent));
+    $$('[data-toggle-active]').forEach(button => button.onclick = () => toggleStudentActive(button.dataset.toggleActive));
     $$('[data-delete-student]').forEach(button => button.onclick = () => deleteStudent(button.dataset.deleteStudent));
+    const trashed = deletedStudents(state).length;
+    $("#trash-count").hidden = !trashed;
+    $("#trash-count").textContent = trashed;
     renderStudentAnalytics(state);
   };
+  studentsRender = render;
   $("#student-search").oninput = render;
   $("#student-status-filter").onchange = render;
   $("#student-sort").onchange = render;
   $("#student-chart-metric").onchange = render;
+  $("#show-inactive").onchange = render;
+  $('[data-action="open-trash"]').onclick = showTrashModal;
   $('[data-action="add-student"]').onclick = () => showStudentModal();
   $('[data-action="export-students"]').onclick = exportStudents;
   $('[data-action="import-students"]').onclick = importStudents;
@@ -346,19 +357,142 @@ function showStudentModal(studentId = null) {
   }});
 }
 
+let studentsRender = () => {};
+
+/** 軟刪除：移進回收筒，相關紀錄原封不動保留，可隨時還原。 */
 function deleteStudent(studentId) {
   const student = store.get().students.find(item => item.id === studentId);
   if (!student) return;
-  if (store.get().settings.confirmDelete && !confirm(`確定刪除學生 ${student.number}？相關成績、點數、出席與觀察紀錄也會一併移除。`)) return;
+  if (store.get().settings.confirmDelete && !confirm(`確定把學生 ${student.number} 移到回收筒？\n成績、點數、出席與觀察紀錄都會保留，可隨時還原。`)) return;
+  store.update(draft => {
+    const target = draft.students.find(item => item.id === studentId);
+    if (target) target.deletedAt = new Date().toISOString();
+  });
+  studentsRender();
+  toast(`學生 ${student.number} 已移到回收筒，可在回收筒還原。`);
+}
+
+function toggleStudentActive(studentId) {
+  const student = store.get().students.find(item => item.id === studentId);
+  if (!student) return;
+  const nextActive = student.active === false;
+  store.update(draft => {
+    const target = draft.students.find(item => item.id === studentId);
+    if (target) target.active = nextActive;
+  });
+  studentsRender();
+  toast(nextActive ? `已恢復 ${student.number}，重新列入班級名單。` : `已停用 ${student.number}，歷史紀錄保留但不列入名單與統計。`);
+}
+
+function showTransferModal(studentId) {
+  const state = store.get();
+  const student = state.students.find(item => item.id === studentId);
+  if (!student) return;
+  const targets = state.classes.filter(item => item.id !== student.classId);
+  const seatOptionsFor = classId => {
+    const free = freeSeats(classId, state, studentId);
+    return free.length
+      ? free.map(seat => `<option value="${seat}"${seat === Number(student.seat) ? " selected" : ""}>${seat} 號${seat > 30 ? "（加號）" : ""}</option>`).join("")
+      : '<option value="">（此班座號已滿）</option>';
+  };
+  openModal({
+    title: "轉班",
+    subtitle: `${student.number}｜成績、出席、點數與觀察紀錄都會一起轉移。`,
+    body: `<form><div class="form-grid"><label class="field">轉入班級<select name="toClassId">${targets.map(item => `<option value="${item.id}">${esc(item.name)}</option>`).join("")}</select></label><label class="field">新座號<select name="toSeat">${seatOptionsFor(targets[0]?.id)}</select></label></div><p class="muted" id="transfer-preview"></p><div class="notice privacy-notice"><strong>學生編號會改成新班級的編號</strong><span>原編號會記錄在轉班紀錄中，方便日後查證。</span></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">確認轉班</button></div></form>`,
+    onReady(modal, close) {
+      const classSelect = modal.querySelector('[name="toClassId"]');
+      const seatSelect = modal.querySelector('[name="toSeat"]');
+      const preview = modal.querySelector("#transfer-preview");
+      const refresh = () => {
+        const target = state.classes.find(item => item.id === classSelect.value);
+        const seat = seatSelect.value;
+        preview.textContent = seat ? `編號將由 ${student.number} 改為 ${studentNumberFor(target.code, seat)}。` : "此班座號已滿，請先停用或轉出其他學生。";
+      };
+      classSelect.onchange = () => { seatSelect.innerHTML = seatOptionsFor(classSelect.value); refresh(); };
+      seatSelect.onchange = refresh;
+      refresh();
+      modal.querySelector("[data-close]").onclick = close;
+      modal.querySelector("form").onsubmit = event => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        const toClassId = String(data.get("toClassId"));
+        const toSeat = String(data.get("toSeat"));
+        if (!toSeat) return toast("該班座號已滿，無法轉入。", "error");
+        let result = null;
+        store.update(draft => { result = transferStudent(draft, studentId, toClassId, toSeat); });
+        close();
+        studentsRender();
+        toast(result ? `已轉班：${result.fromNumber} → ${result.toNumber}。` : "轉班失敗。", result ? "success" : "error");
+      };
+    }
+  });
+}
+
+function showTrashModal() {
+  const state = store.get();
+  const trashed = deletedStudents(state);
+  const classNameOf = classId => state.classes.find(item => item.id === classId)?.name || "—";
+  const body = trashed.length
+    ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>學生編號</th><th>原班級</th><th>刪除時間</th><th><span class="sr-only">操作</span></th></tr></thead><tbody>${trashed.map(student => `<tr><td><strong>${esc(student.number)}</strong><small class="muted"> · ${student.seat} 號</small></td><td>${esc(classNameOf(student.classId))}</td><td>${formatDate(student.deletedAt)}</td><td><div class="row-actions"><button data-restore="${student.id}">還原</button><button class="danger" data-purge="${student.id}">徹底刪除</button></div></td></tr>`).join("")}</tbody></table></div>`
+    : '<p class="muted">回收筒是空的。</p>';
+  openModal({
+    title: "回收筒",
+    subtitle: "刪除的學生會一直保留在這裡，直到你選擇徹底刪除。",
+    className: "large",
+    body: `${body}<div class="modal-actions"><button type="button" class="btn btn-light" data-close>關閉</button></div>`,
+    onReady(modal, close) {
+      modal.querySelector("[data-close]").onclick = close;
+      modal.querySelectorAll("[data-restore]").forEach(button => button.onclick = () => { restoreStudent(button.dataset.restore); close(); showTrashModal(); });
+      modal.querySelectorAll("[data-purge]").forEach(button => button.onclick = () => { if (purgeStudent(button.dataset.purge)) { close(); showTrashModal(); } });
+    }
+  });
+}
+
+function restoreStudent(studentId) {
+  const state = store.get();
+  const student = state.students.find(item => item.id === studentId);
+  if (!student) return;
+  // 座號可能在這段期間被別人占走，還原時自動挪到空號並告知。
+  const taken = occupiedSeats(student.classId, state, studentId);
+  let seat = Number(student.seat);
+  let moved = false;
+  if (taken.has(seat)) {
+    const free = freeSeats(student.classId, state, studentId)[0];
+    if (!free) return toast("原班級座號已滿，請先停用或轉出其他學生再還原。", "error");
+    seat = free;
+    moved = true;
+  }
+  const currentClass = state.classes.find(item => item.id === student.classId);
+  const number = studentNumberFor(currentClass.code, seat);
+  store.update(draft => {
+    const target = draft.students.find(item => item.id === studentId);
+    if (!target) return;
+    delete target.deletedAt;
+    target.active = true;
+    target.seat = seat;
+    target.number = number;
+  });
+  studentsRender();
+  toast(moved ? `已還原，因原座號被占用，改為 ${seat} 號（編號 ${number}）。` : `已還原學生 ${number}。`);
+}
+
+function purgeStudent(studentId) {
+  const student = store.get().students.find(item => item.id === studentId);
+  if (!student) return false;
+  if (!confirm(`確定徹底刪除 ${student.number}？\n成績、點數、出席與觀察紀錄將永久移除，無法復原。`)) return false;
   store.update(draft => {
     draft.students = draft.students.filter(item => item.id !== studentId);
     delete draft.scores[studentId];
+    delete draft.scoreStatus?.[studentId];
     Object.values(draft.attendance).forEach(day => delete day[studentId]);
+    draft.attendanceLog = (draft.attendanceLog || []).filter(item => item.studentId !== studentId);
+    draft.transferLog = (draft.transferLog || []).filter(item => item.studentId !== studentId);
     draft.rewards.ledger = draft.rewards.ledger.filter(item => item.studentId !== studentId);
     draft.observations = draft.observations.filter(item => item.studentId !== studentId);
   });
-  initStudents();
-  toast(`學生 ${student.number} 的資料已刪除。`);
+  studentsRender();
+  toast(`學生 ${student.number} 的資料已永久刪除。`);
+  return true;
 }
 
 function showPointModalForOne(studentId) {

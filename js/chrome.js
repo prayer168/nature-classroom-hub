@@ -1,4 +1,4 @@
-import { store } from "./store.js";
+import { store, activeClass } from "./store.js";
 
 const icons = {
   dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>',
@@ -23,6 +23,7 @@ export function renderChrome() {
   const page = document.body.dataset.page;
   const current = pages.find(([id]) => id === page) || pages[0];
   const state = store.get();
+  const currentClass = activeClass(state);
   const appShell = document.querySelector("#app-shell");
   appShell.innerHTML = `
     <aside class="sidebar" id="sidebar">
@@ -33,11 +34,11 @@ export function renderChrome() {
       </nav>
       <div class="sidebar-foot">
         <a class="nav-link ${page === "settings" ? "active" : ""}" href="settings.html">${icons.settings}<span>串接與設定</span></a>
-        <button class="class-switcher" type="button" data-action="class-switcher"><span class="class-avatar">6A</span><span><strong>${state.classes[0].name}</strong><small>${state.classes[0].schoolYear}</small></span><b>⌄</b></button>
+        <label class="class-switcher"><span class="class-avatar">${currentClass.code}</span><span><small>目前班級</small><select data-action="class-switcher" aria-label="切換班級">${state.classes.map(item => `<option value="${item.id}" ${item.id === state.activeClassId ? "selected" : ""}>${item.name}</option>`).join("")}</select></span></label>
       </div>
     </aside>
     <header class="topbar">
-      <div class="top-actions"><button class="mobile-menu" type="button" aria-label="開啟選單" data-action="mobile-menu">☰</button><span class="breadcrumb">自然課堂中控站 / ${current[1]}</span></div>
+      <div class="top-actions"><button class="mobile-menu" type="button" aria-label="開啟選單" data-action="mobile-menu">☰</button><span class="breadcrumb">${currentClass.name} / ${current[1]}</span></div>
       <div class="top-actions"><span class="sync-indicator ${state.settings.appsScriptUrl ? "connected" : ""}">${state.settings.appsScriptUrl ? "Google 已設定" : "資料儲存在本機"}</span><a class="top-icon" href="settings.html" aria-label="設定">${icons.settings}</a></div>
     </header>`;
 
@@ -45,6 +46,10 @@ export function renderChrome() {
     const sidebar = document.querySelector("#sidebar");
     const open = sidebar.classList.toggle("open");
     appShell.querySelector('[data-action="mobile-menu"]').setAttribute("aria-expanded", String(open));
+  });
+  appShell.querySelector('[data-action="class-switcher"]')?.addEventListener("change", event => {
+    store.update(draft => { draft.activeClassId = event.target.value; });
+    window.location.reload();
   });
   document.addEventListener("click", event => {
     if (window.innerWidth <= 820 && !event.target.closest("#sidebar") && !event.target.closest('[data-action="mobile-menu"]')) {

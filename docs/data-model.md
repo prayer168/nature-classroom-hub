@@ -2,8 +2,8 @@
 
 | 集合 | 主要欄位 | 用途 |
 |---|---|---|
-| classes | id, name, grade, subject, schoolYear | 班級基本資料 |
-| students | id, classId, seat, name, tags, note | 學生名冊與教師私密備註 |
+| classes | id, code, name, grade, subject, schoolYear | 402、403、501、502、503、508 班基本資料 |
+| students | id, classId, number, seat, tags, note | 匿名學生名冊與教師私密備註；不保存真實姓名 |
 | attendance | date → studentId → status | 每日出席；present／late／absent |
 | observations | studentId, category, level, lesson, note, createdAt | 課堂觀察事件 |
 | rewards.ledger | studentId, category, value, note, createdAt | 點數不可覆寫的流水帳 |

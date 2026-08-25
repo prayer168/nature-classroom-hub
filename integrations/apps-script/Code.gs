@@ -36,7 +36,7 @@ function setupNatureHub() {
   }
 
   const definitions = {
-    Students: ['id', 'classId', 'seat', 'name', 'tags', 'note', 'active', 'createdAt'],
+    Students: ['id', 'classId', 'number', 'seat', 'name', 'tags', 'note', 'active', 'createdAt'],
     Attendance: ['date', 'studentId', 'status'],
     Rewards: ['id', 'studentId', 'category', 'value', 'note', 'createdAt'],
     Assessments: ['id', 'name', 'type', 'maxScore', 'weight', 'date'],
@@ -86,7 +86,7 @@ function syncPayload_(payload) {
   const resources = ensureSetup_();
   const spreadsheet = resources.spreadsheet;
 
-  writeObjects_(spreadsheet.getSheetByName('Students'), payload.students, ['id', 'classId', 'seat', 'name', 'tags', 'note', 'active', 'createdAt']);
+  writeObjects_(spreadsheet.getSheetByName('Students'), payload.students, ['id', 'classId', 'number', 'seat', 'name', 'tags', 'note', 'active', 'createdAt']);
 
   const attendanceRows = [];
   Object.keys(payload.attendance || {}).forEach(date => {
@@ -119,7 +119,10 @@ function syncPayload_(payload) {
 function createClassReport_(payload) {
   validatePayload_(payload);
   const resources = ensureSetup_();
-  const className = (payload.classes && payload.classes[0] && payload.classes[0].name) || '班級';
+  const currentClass = (payload.classes || []).find(item => item.id === payload.activeClassId) || (payload.classes || [])[0];
+  const className = (currentClass && currentClass.name) || '班級';
+  const students = (payload.students || []).filter(student => student.classId === payload.activeClassId);
+  const studentIds = new Set(students.map(student => student.id));
   const doc = DocumentApp.create(`${className}自然科學習報告－${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd')}`);
   const body = doc.getBody();
   body.appendParagraph('自然科學習報告').setHeading(DocumentApp.ParagraphHeading.TITLE);
@@ -127,14 +130,14 @@ function createClassReport_(payload) {
   body.appendParagraph(`產生時間：${new Date().toLocaleString()}`);
 
   body.appendParagraph('班級摘要').setHeading(DocumentApp.ParagraphHeading.HEADING1);
-  body.appendListItem(`學生人數：${payload.students.length} 人`);
+  body.appendListItem(`學生人數：${students.length} 人`);
   body.appendListItem(`評量項目：${(payload.assessments || []).length} 項`);
-  body.appendListItem(`正向回饋紀錄：${((payload.rewards && payload.rewards.ledger) || []).filter(item => Number(item.value) > 0).length} 筆`);
+  body.appendListItem(`正向回饋紀錄：${((payload.rewards && payload.rewards.ledger) || []).filter(item => studentIds.has(item.studentId) && Number(item.value) > 0).length} 筆`);
 
   body.appendParagraph('學生學習概況').setHeading(DocumentApp.ParagraphHeading.HEADING1);
-  const tableData = [['座號', '姓名', '加權平均', '目前點數']];
-  payload.students.forEach(student => {
-    tableData.push([String(student.seat), student.name, calculateAverage_(student.id, payload), String(calculatePoints_(student.id, payload))]);
+  const tableData = [['座號', '學生編號', '加權平均', '目前點數']];
+  students.forEach(student => {
+    tableData.push([String(student.seat), student.number, calculateAverage_(student.id, payload), String(calculatePoints_(student.id, payload))]);
   });
   body.appendTable(tableData);
   body.appendParagraph('說明：獎勵點數與學業成績分開呈現，不直接納入學業平均。').setItalic(true);
@@ -150,11 +153,12 @@ function createStudentReport_(payload, studentId) {
   const student = payload.students.find(item => item.id === studentId);
   if (!student) throw new Error('找不到指定學生。');
   const resources = ensureSetup_();
-  const className = (payload.classes && payload.classes[0] && payload.classes[0].name) || '班級';
-  const doc = DocumentApp.create(`${student.name}－自然科學習報告－${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd')}`);
+  const currentClass = (payload.classes || []).find(item => item.id === student.classId);
+  const className = (currentClass && currentClass.name) || '班級';
+  const doc = DocumentApp.create(`學生${student.number}－自然科學習報告－${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd')}`);
   const body = doc.getBody();
   body.appendParagraph('自然科個別學習報告').setHeading(DocumentApp.ParagraphHeading.TITLE);
-  body.appendParagraph(`${className}｜${student.seat} 號 ${student.name}`);
+  body.appendParagraph(`${className}｜${student.seat} 號｜學生編號 ${student.number}`);
   body.appendParagraph(`學習單元：${payload.lesson && payload.lesson.topic ? payload.lesson.topic : '未設定單元'}`);
   body.appendParagraph(`產生時間：${new Date().toLocaleString()}`);
 
@@ -222,7 +226,7 @@ function writeObjects_(sheet, objects, keys) {
 }
 
 function validatePayload_(payload) {
-  if (!payload || payload.version !== 1) throw new Error('資料版本不支援。');
+  if (!payload || ![1, 2].includes(payload.version)) throw new Error('資料版本不支援。');
   if (!Array.isArray(payload.students)) throw new Error('學生資料格式不正確。');
 }
 

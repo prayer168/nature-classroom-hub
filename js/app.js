@@ -1,5 +1,5 @@
 import { renderChrome } from "./chrome.js";
-import { store, getTodayAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, uniqueId, dateKey } from "./store.js";
+import { store, activeClass, activeStudents, studentNumberFor, getTodayAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, uniqueId, dateKey } from "./store.js";
 import { saveFile, getFile, deleteFile } from "./resource-db.js";
 import QRCode from "qrcode";
 import { pingGoogle, syncToGoogle, fetchGoogleBackup, uploadFileToGoogle, createGoogleDocReport, createStudentGoogleDocReport } from "./google-bridge.js";
@@ -80,7 +80,8 @@ function parseCsv(text) {
 }
 
 function studentPicker({ multiple = true } = {}) {
-  return `<div class="student-picker">${store.get().students.map(student => `<label><input type="${multiple ? "checkbox" : "radio"}" name="studentIds" value="${student.id}"><span>${student.seat}. ${esc(student.name)}</span></label>`).join("")}</div>`;
+  const state = store.get();
+  return `<div class="student-picker">${activeStudents(state).map(student => `<label><input type="${multiple ? "checkbox" : "radio"}" name="studentIds" value="${student.id}"><span>${student.seat}. ${esc(student.number)}</span></label>`).join("")}</div>`;
 }
 
 function selectedStudentIds(modal) {
@@ -118,24 +119,26 @@ function showPointModal(defaultCategory = "探究精神", defaultValue = 1, supp
 
 function initDashboard() {
   const state = store.get();
+  const students = activeStudents(state);
+  const studentIds = new Set(students.map(student => student.id));
   const attendance = getTodayAttendance(state);
-  const present = Object.values(attendance).filter(value => value === "present").length;
-  const todayRewards = state.rewards.ledger.filter(entry => entry.createdAt.slice(0, 10) === dateKey()).length;
+  const present = students.filter(student => attendance[student.id] === "present").length;
+  const todayRewards = state.rewards.ledger.filter(entry => studentIds.has(entry.studentId) && entry.createdAt.slice(0, 10) === dateKey()).length;
   $("#today-label").textContent = formatDay(new Date());
   $("#dashboard-stats").innerHTML = [
-    statCard("今日到課", `${present}/${state.students.length}`, `<strong>${Math.round(present / state.students.length * 100)}%</strong> 到課率`, "到"),
-    statCard("今日正向回饋", todayRewards || 6, "持續看見具體行為", "＋"),
+    statCard("今日到課", `${present}/${students.length}`, `<strong>${students.length ? Math.round(present / students.length * 100) : 0}%</strong> 到課率`, "到"),
+    statCard("今日正向回饋", todayRewards, "持續看見具體行為", "＋"),
     statCard("班級學業平均", `${classAverage(state).toFixed(1)}`, "依目前有成績項目計算", "分"),
-    statCard("待補交", state.students.filter(student => Object.values(state.scores[student.id] || {}).some(value => value === null)).length, "點擊成績簿查看名單", "待")
+    statCard("待補交", students.filter(student => Object.values(state.scores[student.id] || {}).some(value => value === null)).length, "點擊成績簿查看名單", "待")
   ].join("");
-  $("#quick-attendance").innerHTML = state.students.map(student => `<button class="student-chip" data-student-id="${student.id}" data-status="${attendance[student.id] || "present"}" aria-label="${esc(student.name)}，${statusLabel[attendance[student.id]] || "到課"}"><span class="seat">${student.seat} 號</span><strong>${esc(student.name.slice(-2))}</strong></button>`).join("");
+  $("#quick-attendance").innerHTML = students.map(student => `<button class="student-chip" data-student-id="${student.id}" data-status="${attendance[student.id] || "present"}" aria-label="學生 ${esc(student.number)}，${statusLabel[attendance[student.id]] || "到課"}"><span class="seat">${student.seat} 號</span><strong>${esc(student.number)}</strong></button>`).join("");
   $("#sync-pill").textContent = state.settings.appsScriptUrl ? "Google 待同步" : "本機模式";
   $("#sync-pill").className = `status-pill ${state.settings.appsScriptUrl ? "status-connected" : "status-local"}`;
   $("#lesson-topic").textContent = state.lesson.topic;
   const weekly = [{ day: "一", a: 92, p: 73 }, { day: "二", a: 96, p: 78 }, { day: "三", a: 96, p: 84 }, { day: "四", a: 100, p: 82 }, { day: "五", a: 94, p: 88 }];
   $("#pulse-chart").innerHTML = weekly.map(item => `<div class="bar-group"><i class="bar" style="height:${item.a}%" title="出席 ${item.a}%"></i><i class="bar secondary" style="height:${item.p}%" title="參與 ${item.p}%"></i><label>週${item.day}</label></div>`).join("");
   $("#pulse-summary").innerHTML = `<strong>本週亮點：</strong> 合作學習回饋比上週增加，探究發表的完成度也正在上升。`;
-  $("#follow-up-list").innerHTML = `<li><span class="task-badge">${state.students.filter(student => state.scores[student.id]?.a04 === null).length}</span><div><strong>探究發表待補交</strong><small>建議下節課安排 8 分鐘完成</small></div><a href="grades.html">查看</a></li><li><span class="task-badge">1</span><div><strong>今日缺席學生</strong><small>補發實驗安全與紀錄單</small></div><a href="students.html">查看</a></li><li><span class="task-badge">3</span><div><strong>教材尚未備份</strong><small>離線檔案建議同步到 Drive</small></div><a href="settings.html">設定</a></li>`;
+  $("#follow-up-list").innerHTML = `<li><span class="task-badge">${students.filter(student => state.scores[student.id]?.a04 === null).length}</span><div><strong>探究發表待補交</strong><small>建議下節課安排 8 分鐘完成</small></div><a href="grades.html">查看</a></li><li><span class="task-badge">${students.filter(student => attendance[student.id] === "absent").length}</span><div><strong>今日缺席學生</strong><small>補發實驗安全與紀錄單</small></div><a href="students.html">查看</a></li><li><span class="task-badge">3</span><div><strong>教材尚未備份</strong><small>離線檔案建議同步到 Drive</small></div><a href="settings.html">設定</a></li>`;
 
   $$(".student-chip").forEach(button => button.addEventListener("click", () => {
     const order = ["present", "late", "absent"];
@@ -145,7 +148,7 @@ function initDashboard() {
     toast(`已更新為「${statusLabel[next]}」。`);
   }));
   $$('[data-quick-point]').forEach(button => button.addEventListener("click", () => showPointModal(button.dataset.quickPoint, Number(button.dataset.value), button.dataset.quickPoint === "需要支持")));
-  $('[data-action="all-present"]').onclick = () => { store.update(draft => draft.students.forEach(student => { getTodayAttendance(draft)[student.id] = "present"; })); initDashboard(); toast("已將全班標記為到課。"); };
+  $('[data-action="all-present"]').onclick = () => { store.update(draft => activeStudents(draft).forEach(student => { getTodayAttendance(draft)[student.id] = "present"; })); initDashboard(); toast("已將全班標記為到課。"); };
   $('[data-action="start-class"]').onclick = () => { store.update(draft => { draft.lesson.startedAt = new Date().toISOString(); }); toast("課堂已開始，祝今天探究順利！"); };
   $('[data-action="edit-lesson"]').onclick = () => openLessonModal();
 }
@@ -176,11 +179,12 @@ const zoneDetails = {
 
 function initClassroom() {
   const state = store.get();
+  const students = activeStudents(state);
   const attendance = getTodayAttendance(state);
-  const assigned = state.students.filter(student => student.seat >= 1 && student.seat <= 30).length;
-  const present = state.students.filter(student => attendance[student.id] === "present").length;
-  const late = state.students.filter(student => attendance[student.id] === "late").length;
-  const absent = state.students.filter(student => attendance[student.id] === "absent").length;
+  const assigned = students.filter(student => student.seat >= 1 && student.seat <= 30).length;
+  const present = students.filter(student => attendance[student.id] === "present").length;
+  const late = students.filter(student => attendance[student.id] === "late").length;
+  const absent = students.filter(student => attendance[student.id] === "absent").length;
   $("#classroom-topic").textContent = state.lesson.topic;
   $("#classroom-summary").innerHTML = [
     ["配置座位", `${assigned}/30`], ["今日到課", present], ["今日遲到", late], ["今日缺席", absent]
@@ -190,10 +194,10 @@ function initClassroom() {
     const tableNode = document.querySelector(`[data-table="${tableId}"]`);
     tableNode.dataset.groupLabel = table.label;
     tableNode.innerHTML = table.seats.map(seat => {
-      const student = state.students.find(item => Number(item.seat) === seat);
+      const student = students.find(item => Number(item.seat) === seat);
       const status = student ? attendance[student.id] || "present" : "empty";
-      const label = student ? `${seat} 號 ${student.name}，${statusLabel[status]}` : `${seat} 號空位`;
-      return `<button class="seat-button" data-seat="${seat}" data-student-id="${student?.id || ""}" data-status="${status}" aria-label="${esc(label)}"><span class="seat-number">${seat}</span><span class="seat-name">${esc(student?.name || "空位")}</span></button>`;
+      const label = student ? `${seat} 號學生 ${student.number}，${statusLabel[status]}` : `${seat} 號空位`;
+      return `<button class="seat-button" data-seat="${seat}" data-student-id="${student?.id || ""}" data-status="${status}" aria-label="${esc(label)}"><span class="seat-number">${seat}</span><span class="seat-name">${esc(student?.number || "空位")}</span></button>`;
     }).join("");
   });
 
@@ -205,7 +209,7 @@ function initClassroom() {
     document.body.classList.toggle("classroom-projecting");
     const projecting = document.body.classList.contains("classroom-projecting");
     $('[data-action="classroom-project"]').textContent = projecting ? "離開投影模式" : "進入投影模式";
-    toast(projecting ? "已隱藏學生姓名與個別狀態。" : "已返回教師操作模式。");
+    toast(projecting ? "已隱藏學生編號與個別狀態。" : "已返回教師操作模式。");
   };
 }
 
@@ -246,49 +250,110 @@ function showLayoutReference() {
 function initStudents() {
   const render = () => {
     const state = store.get();
+    const currentClass = activeClass(state);
     const query = $("#student-search").value.trim().toLowerCase();
     const filter = $("#student-status-filter").value;
+    const sort = $("#student-sort").value;
     const attendance = getTodayAttendance(state);
-    const students = state.students.filter(student => {
-      const matchesText = `${student.seat}${student.name}${student.tags.join(" ")}`.toLowerCase().includes(query);
+    const students = activeStudents(state).filter(student => {
+      const matchesText = `${student.number} ${student.seat} ${student.tags.join(" ")}`.toLowerCase().includes(query);
       return matchesText && (filter === "all" || attendance[student.id] === filter);
+    });
+    const compareValue = (student, metric) => metric === "points" ? studentPoints(student.id, state) : studentAverage(student.id, state);
+    const [sortMetric, direction] = sort.split("-");
+    students.sort((a, b) => {
+      if (sortMetric === "seat") return (a.seat - b.seat) * (direction === "desc" ? -1 : 1);
+      const metric = sortMetric === "grade" ? "grade" : "points";
+      const aValue = compareValue(a, metric), bValue = compareValue(b, metric);
+      if (aValue === null && bValue !== null) return 1;
+      if (bValue === null && aValue !== null) return -1;
+      return ((aValue ?? 0) - (bValue ?? 0)) * (direction === "desc" ? -1 : 1) || a.seat - b.seat;
     });
     $("#student-table-body").innerHTML = students.map(student => {
       const status = attendance[student.id] || "present";
       const average = studentAverage(student.id, state);
-      return `<tr><td><div class="student-cell"><span class="avatar">${esc(student.name.slice(-1))}</span><div><strong>${student.seat}. ${esc(student.name)}</strong><small>${esc(state.classes[0].name)}</small></div></div></td><td><span class="badge ${status}">${statusLabel[status]}</span></td><td><strong>${studentPoints(student.id, state)}</strong> 點</td><td>${average === null ? "—" : `<strong>${average.toFixed(1)}</strong>`}</td><td>${student.tags.length ? student.tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join("") : '<span class="muted">—</span>'}</td><td><div class="row-actions"><button data-edit-student="${student.id}">編輯</button><button data-student-point="${student.id}">加點</button></div></td></tr>`;
+      return `<tr><td><div class="student-cell"><span class="avatar">${student.seat}</span><div><strong>${esc(student.number)}</strong><small>${esc(currentClass.name)} · ${student.seat} 號</small></div></div></td><td><span class="badge ${status}">${statusLabel[status]}</span></td><td><strong>${studentPoints(student.id, state)}</strong> 點</td><td>${average === null ? "—" : `<strong>${average.toFixed(1)}</strong>`}</td><td>${student.tags.length ? student.tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join("") : '<span class="muted">—</span>'}</td><td><div class="row-actions"><button data-edit-student="${student.id}">編輯</button><button data-student-point="${student.id}">加點</button><button class="danger" data-delete-student="${student.id}">刪除</button></div></td></tr>`;
     }).join("");
     $("#student-empty").hidden = students.length > 0;
     $$('[data-edit-student]').forEach(button => button.onclick = () => showStudentModal(button.dataset.editStudent));
     $$('[data-student-point]').forEach(button => button.onclick = () => showPointModalForOne(button.dataset.studentPoint));
+    $$('[data-delete-student]').forEach(button => button.onclick = () => deleteStudent(button.dataset.deleteStudent));
+    renderStudentAnalytics(state);
   };
   $("#student-search").oninput = render;
   $("#student-status-filter").onchange = render;
+  $("#student-sort").onchange = render;
+  $("#student-chart-metric").onchange = render;
   $('[data-action="add-student"]').onclick = () => showStudentModal();
   $('[data-action="export-students"]').onclick = exportStudents;
   $('[data-action="import-students"]').onclick = importStudents;
+  $('[data-action="student-template"]').onclick = downloadStudentTemplate;
   render();
 }
 
+function renderStudentAnalytics(state) {
+  const students = activeStudents(state);
+  const currentClass = activeClass(state);
+  const gradeValues = students.map(student => studentAverage(student.id, state)).filter(value => value !== null).sort((a, b) => a - b);
+  const pointValues = students.map(student => studentPoints(student.id, state));
+  const median = gradeValues.length ? (gradeValues[Math.floor((gradeValues.length - 1) / 2)] + gradeValues[Math.ceil((gradeValues.length - 1) / 2)]) / 2 : null;
+  const averagePoints = pointValues.length ? pointValues.reduce((sum, value) => sum + value, 0) / pointValues.length : 0;
+  $("#student-analytics-stats").innerHTML = [
+    statCard("學生人數", students.length, `${currentClass.name}匿名名冊`, "人"),
+    statCard("班級平均", gradeValues.length ? classAverage(state).toFixed(1) : "—", "學業成績（滿分 100）", "分"),
+    statCard("成績中位數", median === null ? "—" : median.toFixed(1), "降低極端值干擾", "中"),
+    statCard("平均獎勵點數", averagePoints.toFixed(1), "點數與成績分開計算", "點")
+  ].join("");
+  const metric = $("#student-chart-metric").value;
+  const unit = metric === "grade" ? "分" : "點";
+  const label = metric === "grade" ? "學業平均" : "獎勵點數";
+  const ranked = students.map(student => ({ student, value: metric === "grade" ? studentAverage(student.id, state) : studentPoints(student.id, state) })).filter(item => item.value !== null).sort((a, b) => b.value - a.value || a.student.seat - b.student.seat).slice(0, 10);
+  const max = metric === "grade" ? 100 : Math.max(1, ...ranked.map(item => Math.max(0, item.value)));
+  $("#student-chart-subtitle").textContent = `${currentClass.name}前 ${ranked.length} 名 · ${label}（${unit}）· 橫軸從 0 起算`;
+  const chart = $("#student-comparison-chart");
+  chart.setAttribute("aria-label", `${currentClass.name}${label}前 ${ranked.length} 名：${ranked.map(item => `學生 ${item.student.number} ${Number(item.value).toFixed(metric === "grade" ? 1 : 0)}${unit}`).join("，") || "尚無資料"}`);
+  chart.innerHTML = ranked.length ? ranked.map(item => `<div class="ranking-row"><span class="ranking-label">${esc(item.student.number)}</span><span class="ranking-track"><i class="ranking-bar" style="width:${Math.max(0, item.value) / max * 100}%"></i></span><strong class="ranking-value">${Number(item.value).toFixed(metric === "grade" ? 1 : 0)} ${unit}</strong></div>`).join("") : '<div class="empty-state"><p>尚無可視覺化的資料。</p></div>';
+}
+
 function showStudentModal(studentId = null) {
-  const current = store.get().students.find(student => student.id === studentId);
-  openModal({ title: current ? "編輯學生" : "新增學生", subtitle: "只填課堂管理真正需要的資料。", body: `<form><div class="form-grid"><label class="field">座號<input name="seat" type="number" min="1" value="${current?.seat ?? store.get().students.length + 1}" required></label><label class="field">姓名<input name="name" value="${esc(current?.name || "")}" required></label><label class="field full-field">標籤（以逗號分隔）<input name="tags" value="${esc(current?.tags?.join(", ") || "")}" placeholder="例如：器材長, 需留意視力"></label><label class="field full-field">教師私密備註<textarea name="note" rows="3">${esc(current?.note || "")}</textarea></label></div><div class="modal-actions">${current ? '<button class="btn btn-danger-quiet" type="button" data-delete>刪除</button>' : ""}<button class="btn btn-light" type="button" data-close>取消</button><button class="btn btn-primary">儲存</button></div></form>`, onReady(modal, close) {
+  const state = store.get();
+  const current = state.students.find(student => student.id === studentId);
+  const currentClass = activeClass(state);
+  const occupied = new Set(activeStudents(state).filter(student => student.id !== studentId).map(student => Number(student.seat)));
+  const availableSeats = Array.from({ length: 30 }, (_, index) => index + 1).filter(seat => !occupied.has(seat));
+  const defaultSeat = current?.seat ?? availableSeats[0];
+  if (!current && !defaultSeat) return toast("目前班級 30 個座號皆已建立。", "error");
+  openModal({ title: current ? "編輯學生資料" : "新增匿名學生", subtitle: `${currentClass.name}只使用學生編號，不輸入真實姓名。`, body: `<form><div class="form-grid"><label class="field">座號<select name="seat" ${current ? "disabled" : ""}>${(current ? [current.seat] : availableSeats).map(seat => `<option value="${seat}" ${seat === defaultSeat ? "selected" : ""}>${seat} 號</option>`).join("")}</select></label><label class="field">學生編號<input value="${esc(current?.number || studentNumberFor(currentClass.code, defaultSeat))}" readonly></label><label class="field full-field">標籤（以逗號分隔）<input name="tags" value="${esc(current?.tags?.join(", ") || "")}" placeholder="例如：器材長, 需留意視力"></label><label class="field full-field">教師私密備註<textarea name="note" rows="3">${esc(current?.note || "")}</textarea></label></div><div class="notice privacy-notice"><strong>匿名原則</strong><span>系統會以「學生編號」識別學生；即使匯入檔含姓名欄，也不會儲存姓名。</span></div><div class="modal-actions">${current ? '<button class="btn btn-danger-quiet" type="button" data-delete>刪除</button>' : ""}<button class="btn btn-light" type="button" data-close>取消</button><button class="btn btn-primary">儲存</button></div></form>`, onReady(modal, close) {
     modal.querySelector("[data-close]").onclick = close;
+    modal.querySelector('[name="seat"]')?.addEventListener("change", event => { modal.querySelector('input[readonly]').value = studentNumberFor(currentClass.code, Number(event.target.value)); });
     modal.querySelector("form").onsubmit = event => {
       event.preventDefault(); const data = new FormData(event.currentTarget);
       store.update(draft => {
-        const payload = { seat: Number(data.get("seat")), name: String(data.get("name")).trim(), tags: String(data.get("tags") || "").split(/[,，]/).map(item => item.trim()).filter(Boolean), note: String(data.get("note") || "") };
+        const seat = current?.seat ?? Number(data.get("seat"));
+        const number = studentNumberFor(currentClass.code, seat);
+        const payload = { seat, number, name: `學生 ${number}`, tags: String(data.get("tags") || "").split(/[,，]/).map(item => item.trim()).filter(Boolean), note: String(data.get("note") || "") };
         if (current) Object.assign(draft.students.find(item => item.id === current.id), payload);
-        else { const id = uniqueId("student"); draft.students.push({ id, classId: draft.activeClassId, active: true, createdAt: new Date().toISOString(), ...payload }); draft.scores[id] = {}; getTodayAttendance(draft)[id] = "present"; }
+        else { const id = `stu-${number}`; draft.students.push({ id, classId: draft.activeClassId, active: true, createdAt: new Date().toISOString(), ...payload }); draft.scores[id] = {}; getTodayAttendance(draft)[id] = "present"; }
       });
-      close(); initStudents(); toast(current ? "學生資料已更新。" : "已新增學生。");
+      close(); initStudents(); toast(current ? "學生資料已更新。" : "已新增匿名學生。");
     };
-    modal.querySelector("[data-delete]")?.addEventListener("click", () => {
-      if (store.get().settings.confirmDelete && !confirm(`確定刪除 ${current.name}？相關成績與點數也會一併移除。`)) return;
-      store.update(draft => { draft.students = draft.students.filter(item => item.id !== current.id); delete draft.scores[current.id]; Object.values(draft.attendance).forEach(day => delete day[current.id]); draft.rewards.ledger = draft.rewards.ledger.filter(item => item.studentId !== current.id); });
-      close(); initStudents(); toast("學生資料已刪除。");
-    });
+    modal.querySelector("[data-delete]")?.addEventListener("click", () => { close(); deleteStudent(current.id); });
   }});
+}
+
+function deleteStudent(studentId) {
+  const student = store.get().students.find(item => item.id === studentId);
+  if (!student) return;
+  if (store.get().settings.confirmDelete && !confirm(`確定刪除學生 ${student.number}？相關成績、點數、出席與觀察紀錄也會一併移除。`)) return;
+  store.update(draft => {
+    draft.students = draft.students.filter(item => item.id !== studentId);
+    delete draft.scores[studentId];
+    Object.values(draft.attendance).forEach(day => delete day[studentId]);
+    draft.rewards.ledger = draft.rewards.ledger.filter(item => item.studentId !== studentId);
+    draft.observations = draft.observations.filter(item => item.studentId !== studentId);
+  });
+  initStudents();
+  toast(`學生 ${student.number} 的資料已刪除。`);
 }
 
 function showPointModalForOne(studentId) {
@@ -311,7 +376,7 @@ function showGroupPointModal() {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
         const table = classroomTables[String(data.get("tableId"))];
-        const students = state.students.filter(student => table.seats.includes(Number(student.seat)));
+        const students = activeStudents(state).filter(student => table.seats.includes(Number(student.seat)));
         if (!students.length) return toast("這張實驗桌目前沒有已安排的學生。", "error");
         const category = String(data.get("category"));
         const value = Number(data.get("value"));
@@ -329,19 +394,46 @@ function showGroupPointModal() {
 }
 
 function exportStudents() {
-  const state = store.get(); const attendance = getTodayAttendance(state);
-  const rows = [["座號", "姓名", "今日狀態", "點數", "學業平均", "標籤"], ...state.students.map(student => [student.seat, student.name, statusLabel[attendance[student.id]], studentPoints(student.id, state), studentAverage(student.id, state)?.toFixed(1) || "", student.tags.join(";")])];
-  download(`自然課學生名冊-${dateKey()}.csv`, "\ufeff" + rows.map(row => row.map(csvEscape).join(",")).join("\n"), "text/csv;charset=utf-8");
+  const state = store.get(); const attendance = getTodayAttendance(state); const currentClass = activeClass(state);
+  const rows = [["學生編號", "座號", "今日狀態", "點數", "學業平均", "標籤", "教師備註"], ...activeStudents(state).sort((a, b) => a.seat - b.seat).map(student => [student.number, student.seat, statusLabel[attendance[student.id]], studentPoints(student.id, state), studentAverage(student.id, state)?.toFixed(1) || "", student.tags.join(";"), student.note || ""])];
+  download(`${currentClass.code}-匿名學生名冊-${dateKey()}.csv`, "\ufeff" + rows.map(row => row.map(csvEscape).join(",")).join("\n"), "text/csv;charset=utf-8");
   toast("學生名冊已匯出。");
 }
 
+function downloadStudentTemplate() {
+  const state = store.get(); const currentClass = activeClass(state);
+  const rows = [["學生編號", "座號", "標籤", "教師備註"], ...Array.from({ length: 30 }, (_, index) => { const seat = index + 1; return [studentNumberFor(currentClass.code, seat), seat, "", ""]; })];
+  download(`${currentClass.code}-學生匯入範本.csv`, "\ufeff" + rows.map(row => row.map(csvEscape).join(",")).join("\n"), "text/csv;charset=utf-8");
+  toast("匿名學生 CSV 範本已下載。");
+}
+
 function importStudents() {
-  const input = document.createElement("input"); input.type = "file"; input.accept = ".csv,text/csv";
+  const input = document.createElement("input"); input.type = "file"; input.accept = ".csv,text/csv"; input.hidden = true; document.body.append(input);
   input.onchange = async () => {
-    const text = await input.files[0].text(); const rows = parseCsv(text); if (!rows.length) return toast("CSV 沒有可讀資料。", "error");
-    const header = rows[0].map(item => item.toLowerCase()); const nameIndex = header.findIndex(item => ["姓名", "name", "學生"].includes(item)); const seatIndex = header.findIndex(item => ["座號", "seat", "number"].includes(item)); const dataRows = nameIndex >= 0 ? rows.slice(1) : rows;
-    store.update(draft => dataRows.forEach((row, index) => { const name = (nameIndex >= 0 ? row[nameIndex] : row[1] || row[0])?.trim(); if (!name) return; const seat = Number(seatIndex >= 0 ? row[seatIndex] : row[0]) || draft.students.length + 1; if (draft.students.some(item => item.name === name && item.seat === seat)) return; const id = uniqueId("student"); draft.students.push({ id, seat, name, classId: draft.activeClassId, tags: [], note: "", active: true, createdAt: new Date().toISOString() }); draft.scores[id] = {}; getTodayAttendance(draft)[id] = "present"; }));
-    initStudents(); toast("CSV 名冊已匯入，重複姓名與座號已略過。");
+    const file = input.files[0]; if (!file) { input.remove(); return; }
+    const text = await file.text(); const rows = parseCsv(text); if (!rows.length) { input.remove(); return toast("CSV 沒有可讀資料。", "error"); }
+    const header = rows[0].map(item => item.replace(/^\ufeff/, "").trim().toLowerCase());
+    const findColumn = aliases => header.findIndex(item => aliases.includes(item));
+    const numberIndex = findColumn(["學生編號", "編號", "studentid", "student id", "id"]), seatIndex = findColumn(["座號", "seat", "number"]), tagsIndex = findColumn(["標籤", "tags", "tag"]), noteIndex = findColumn(["教師備註", "備註", "note", "notes"]);
+    if (numberIndex < 0 && seatIndex < 0) { input.remove(); return toast("CSV 至少需要「學生編號」或「座號」欄位。", "error"); }
+    let added = 0, updated = 0, skipped = 0;
+    store.update(draft => {
+      const currentClass = activeClass(draft);
+      rows.slice(1).forEach(row => {
+        const importedNumber = numberIndex >= 0 ? String(row[numberIndex] || "").trim() : "";
+        const seat = seatIndex >= 0 ? Number(row[seatIndex]) : Number(importedNumber.slice(-2));
+        const expectedNumber = Number.isInteger(seat) && seat >= 1 && seat <= 30 ? studentNumberFor(currentClass.code, seat) : "";
+        if (!expectedNumber || (importedNumber && importedNumber !== expectedNumber)) { skipped++; return; }
+        const tags = tagsIndex >= 0 ? String(row[tagsIndex] || "").split(/[;,，]/).map(item => item.trim()).filter(Boolean) : [];
+        const note = noteIndex >= 0 ? String(row[noteIndex] || "").trim() : "";
+        const existing = draft.students.find(item => item.classId === draft.activeClassId && (item.number === expectedNumber || Number(item.seat) === seat));
+        if (existing) { existing.number = expectedNumber; existing.name = `學生 ${expectedNumber}`; existing.tags = tags; existing.note = note; updated++; return; }
+        const id = `stu-${expectedNumber}`;
+        draft.students.push({ id, classId: draft.activeClassId, seat, number: expectedNumber, name: `學生 ${expectedNumber}`, tags, note, active: true, createdAt: new Date().toISOString() });
+        draft.scores[id] = {}; getTodayAttendance(draft)[id] = "present"; added++;
+      });
+    });
+    input.remove(); initStudents(); toast(`匯入完成：新增 ${added} 筆、更新 ${updated} 筆、略過 ${skipped} 筆。`);
   };
   input.click();
 }
@@ -365,14 +457,15 @@ const rewardLevelDefinitions = [
 function initRewards() {
   const render = () => {
     const state = store.get(); const query = $("#reward-search")?.value.trim().toLowerCase() || "";
-    const total = state.rewards.ledger.filter(entry => entry.value > 0).reduce((sum, entry) => sum + entry.value, 0);
-    const redeemed = Math.abs(state.rewards.ledger.filter(entry => entry.value < 0).reduce((sum, entry) => sum + entry.value, 0));
-    $("#reward-stats").innerHTML = [statCard("本期正向點數", total, "包含個人與小組回饋", "＋"), statCard("獲得回饋學生", new Set(state.rewards.ledger.filter(entry => entry.value > 0).map(entry => entry.studentId)).size, "持續讓每位學生被看見", "人"), statCard("已兌換點數", redeemed, "兌換後保留完整流水帳", "換"), statCard("最常見回饋", topCategory(state), "依本期點數事件統計", "類")].join("");
+    const students = activeStudents(state); const studentIds = new Set(students.map(student => student.id)); const ledger = state.rewards.ledger.filter(entry => studentIds.has(entry.studentId));
+    const total = ledger.filter(entry => entry.value > 0).reduce((sum, entry) => sum + entry.value, 0);
+    const redeemed = Math.abs(ledger.filter(entry => entry.value < 0).reduce((sum, entry) => sum + entry.value, 0));
+    $("#reward-stats").innerHTML = [statCard("本期正向點數", total, "包含個人與小組回饋", "＋"), statCard("獲得回饋學生", new Set(ledger.filter(entry => entry.value > 0).map(entry => entry.studentId)).size, "持續讓每位學生被看見", "人"), statCard("已兌換點數", redeemed, "兌換後保留完整流水帳", "換"), statCard("最常見回饋", topCategory(state), "依本期點數事件統計", "類")].join("");
     $("#reward-rule-grid").innerHTML = rewardRuleDefinitions.map(rule => `<article class="reward-rule"><span class="reward-rule-icon">${esc(rule.icon)}</span><div><strong>${esc(rule.title)}</strong><p>${esc(rule.detail)}</p></div><button class="btn btn-light" data-rule-category="${esc(rule.category)}" data-rule-value="${rule.value}">＋${rule.value} 加點</button></article>`).join("");
     $("#reward-levels").innerHTML = rewardLevelDefinitions.map(level => `<div class="reward-level"><strong>${esc(level.range)}</strong><span>${esc(level.title)}</span><small>${esc(level.detail)}</small></div>`).join("");
-    $("#reward-student-grid").innerHTML = state.students.filter(student => student.name.toLowerCase().includes(query)).map(student => `<article class="reward-person"><span class="avatar">${esc(student.name.slice(-1))}</span><div><strong>${student.seat}. ${esc(student.name)}</strong><small>本期累積</small></div><span class="points">${studentPoints(student.id, state)}</span></article>`).join("");
+    $("#reward-student-grid").innerHTML = students.filter(student => `${student.number} ${student.seat}`.includes(query)).map(student => `<article class="reward-person"><span class="avatar">${student.seat}</span><div><strong>${esc(student.number)}</strong><small>${student.seat} 號 · 本期累積</small></div><span class="points">${studentPoints(student.id, state)}</span></article>`).join("");
     $("#reward-menu").innerHTML = [...state.rewards.menu].sort((a, b) => a.cost - b.cost).map(item => `<article class="reward-catalog-item"><div class="reward-prize-icon" aria-hidden="true">${esc(item.icon || "獎")}</div><div class="reward-prize-copy"><span class="reward-type">${esc(item.type || "班級獎品")}</span><h3>${esc(item.name)}</h3><p>${esc(item.note)}</p></div><div class="reward-prize-action"><strong>${item.cost} 點</strong><button class="btn btn-secondary" data-redeem-reward="${item.id}">選擇兌換</button></div></article>`).join("");
-    $("#ledger-body").innerHTML = state.rewards.ledger.slice(0, 80).map(entry => { const student = state.students.find(item => item.id === entry.studentId); return `<tr><td>${formatDate(entry.createdAt)}</td><td>${esc(student?.name || "已刪除")}</td><td>${esc(entry.category)}</td><td><span class="delta ${entry.value >= 0 ? "positive" : "negative"}">${entry.value > 0 ? "+" : ""}${entry.value}</span></td><td>${esc(entry.note || "—")}</td></tr>`; }).join("");
+    $("#ledger-body").innerHTML = ledger.slice(0, 80).map(entry => { const student = state.students.find(item => item.id === entry.studentId); return `<tr><td>${formatDate(entry.createdAt)}</td><td>${esc(student?.number || "已刪除")}</td><td>${esc(entry.category)}</td><td><span class="delta ${entry.value >= 0 ? "positive" : "negative"}">${entry.value > 0 ? "+" : ""}${entry.value}</span></td><td>${esc(entry.note || "—")}</td></tr>`; }).join("");
     $$('[data-rule-category]').forEach(button => button.onclick = () => showPointModal(button.dataset.ruleCategory, Number(button.dataset.ruleValue)));
     $$('[data-redeem-reward]').forEach(button => button.onclick = () => showRedeemModal(button.dataset.redeemReward));
   };
@@ -385,13 +478,14 @@ function initRewards() {
 }
 
 function topCategory(state) {
-  const counts = {}; state.rewards.ledger.filter(item => item.value > 0).forEach(item => counts[item.category] = (counts[item.category] || 0) + 1);
+  const studentIds = new Set(activeStudents(state).map(student => student.id));
+  const counts = {}; state.rewards.ledger.filter(item => item.value > 0 && studentIds.has(item.studentId)).forEach(item => counts[item.category] = (counts[item.category] || 0) + 1);
   return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
 }
 
 function showRedeemModal(defaultRewardId = "") {
   const state = store.get();
-  openModal({ title: "兌換獎勵", subtitle: "兌換會扣除點數並保留流水帳；獎勵點數不影響學業成績。", body: `<form><div class="form-grid"><label class="field full-field">學生<select name="studentId">${state.students.map(student => `<option value="${student.id}">${student.seat}. ${esc(student.name)}（可用 ${studentPoints(student.id, state)} 點）</option>`).join("")}</select></label><label class="field full-field">獎品<select name="rewardId">${[...state.rewards.menu].sort((a,b) => a.cost-b.cost).map(item => `<option value="${item.id}" ${item.id === defaultRewardId ? "selected" : ""}>${esc(item.name)}（${item.cost} 點）</option>`).join("")}</select></label></div><div class="notice"><strong>兌換提醒</strong><span>教師確認獎品庫存與交付時間後再完成兌換；系統會自動留下扣點紀錄。</span></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">確認兌換</button></div></form>`, onReady(modal, close) {
+  openModal({ title: "兌換獎勵", subtitle: "兌換會扣除點數並保留流水帳；獎勵點數不影響學業成績。", body: `<form><div class="form-grid"><label class="field full-field">學生<select name="studentId">${activeStudents(state).map(student => `<option value="${student.id}">${student.seat} 號 · ${esc(student.number)}（可用 ${studentPoints(student.id, state)} 點）</option>`).join("")}</select></label><label class="field full-field">獎品<select name="rewardId">${[...state.rewards.menu].sort((a,b) => a.cost-b.cost).map(item => `<option value="${item.id}" ${item.id === defaultRewardId ? "selected" : ""}>${esc(item.name)}（${item.cost} 點）</option>`).join("")}</select></label></div><div class="notice"><strong>兌換提醒</strong><span>教師確認獎品庫存與交付時間後再完成兌換；系統會自動留下扣點紀錄。</span></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">確認兌換</button></div></form>`, onReady(modal, close) {
     modal.querySelector("[data-close]").onclick = close;
     modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget); const studentId = String(data.get("studentId")); const reward = state.rewards.menu.find(item => item.id === data.get("rewardId")); if (!reward) return toast("找不到這項獎品。", "error"); const available = studentPoints(studentId, store.get()); if (available < reward.cost) return toast(`點數不足：目前 ${available} 點，還需要 ${reward.cost - available} 點。`, "error"); store.update(draft => draft.rewards.ledger.unshift({ id: uniqueId("redeem"), studentId, category: "獎勵兌換", value: -reward.cost, note: reward.name, createdAt: new Date().toISOString() })); close(); initRewards(); toast(`已兌換「${reward.name}」，扣除 ${reward.cost} 點。`); };
   }});
@@ -402,16 +496,17 @@ function editRewardMenu() {
 }
 
 function exportLedger() {
-  const state = store.get(); const rows = [["時間", "學生", "類型", "點數", "備註"], ...state.rewards.ledger.map(entry => [entry.createdAt, state.students.find(item => item.id === entry.studentId)?.name || "", entry.category, entry.value, entry.note])]; download(`自然課點數流水帳-${dateKey()}.csv`, "\ufeff" + rows.map(row => row.map(csvEscape).join(",")).join("\n"), "text/csv;charset=utf-8"); toast("流水帳已匯出。");
+  const state = store.get(); const currentClass = activeClass(state); const studentIds = new Set(activeStudents(state).map(student => student.id)); const rows = [["時間", "學生編號", "類型", "點數", "備註"], ...state.rewards.ledger.filter(entry => studentIds.has(entry.studentId)).map(entry => [entry.createdAt, state.students.find(item => item.id === entry.studentId)?.number || "", entry.category, entry.value, entry.note])]; download(`${currentClass.code}-自然課點數流水帳-${dateKey()}.csv`, "\ufeff" + rows.map(row => row.map(csvEscape).join(",")).join("\n"), "text/csv;charset=utf-8"); toast("流水帳已匯出。");
 }
 
 function initGrades() {
   const state = store.get();
-  const pending = state.students.filter(student => state.assessments.some(item => state.scores[student.id]?.[item.id] === null || state.scores[student.id]?.[item.id] === undefined)).length;
+  const students = activeStudents(state);
+  const pending = students.filter(student => state.assessments.some(item => state.scores[student.id]?.[item.id] === null || state.scores[student.id]?.[item.id] === undefined)).length;
   const best = [...state.assessments].sort((a, b) => assessmentAverage(b.id, state) - assessmentAverage(a.id, state))[0];
   $("#grade-stats").innerHTML = [statCard("班級平均", classAverage(state).toFixed(1), "依評量權重自動換算", "均"), statCard("目前評量", state.assessments.length, `總權重 ${state.assessments.reduce((s, a) => s + a.weight, 0)}%`, "項"), statCard("待補成績", pending, "至少一項尚未輸入", "待"), statCard("表現較佳項目", best?.name || "—", `${assessmentAverage(best?.id, state).toFixed(1)}%`, "優")].join("");
   $("#gradebook-head").innerHTML = `<tr><th>學生</th>${state.assessments.map(item => `<th><div class="assessment-head"><strong>${esc(item.name)}</strong><small>${item.maxScore} 分 · 權重 ${item.weight}%</small></div></th>`).join("")}<th>加權平均</th></tr>`;
-  $("#gradebook-body").innerHTML = state.students.map(student => `<tr><td><div class="student-cell"><span class="avatar">${esc(student.name.slice(-1))}</span><div><strong>${student.seat}. ${esc(student.name)}</strong></div></div></td>${state.assessments.map(item => { const value = state.scores[student.id]?.[item.id]; return `<td><input class="score-input" data-student="${student.id}" data-assessment="${item.id}" data-max="${item.maxScore}" type="number" min="0" max="${item.maxScore}" value="${value ?? ""}" aria-label="${esc(student.name)} ${esc(item.name)}分數"></td>`; }).join("")}<td><span class="score-average">${studentAverage(student.id, state)?.toFixed(1) || "—"}</span></td></tr>`).join("");
+  $("#gradebook-body").innerHTML = students.map(student => `<tr><td><div class="student-cell"><span class="avatar">${student.seat}</span><div><strong>${esc(student.number)}</strong><small>${student.seat} 號</small></div></div></td>${state.assessments.map(item => { const value = state.scores[student.id]?.[item.id]; return `<td><input class="score-input" data-student="${student.id}" data-assessment="${item.id}" data-max="${item.maxScore}" type="number" min="0" max="${item.maxScore}" value="${value ?? ""}" aria-label="學生 ${esc(student.number)} ${esc(item.name)}分數"></td>`; }).join("")}<td><span class="score-average">${studentAverage(student.id, state)?.toFixed(1) || "—"}</span></td></tr>`).join("");
   $$(".score-input").forEach(input => {
     input.onchange = () => { const value = input.value === "" ? null : Number(input.value); if (value !== null && (value < 0 || value > Number(input.dataset.max))) { input.classList.add("invalid"); return toast(`分數需介於 0 到 ${input.dataset.max}。`, "error"); } input.classList.remove("invalid"); store.update(draft => { draft.scores[input.dataset.student] ||= {}; draft.scores[input.dataset.student][input.dataset.assessment] = value; }); initGrades(); toast("成績已儲存。"); };
     input.onkeydown = event => { if (event.key === "Enter") { event.preventDefault(); input.onchange(); } };
@@ -421,11 +516,11 @@ function initGrades() {
 }
 
 function showAssessmentModal() {
-  openModal({ title: "新增評量", subtitle: "評量權重用來換算學期表現，可稍後調整。", body: `<form><div class="form-grid"><label class="field full-field">評量名稱<input name="name" required placeholder="例如：酸鹼指示劑實驗"></label><label class="field">類型<select name="type"><option>形成性</option><option>實作</option><option>總結性</option></select></label><label class="field">日期<input name="date" type="date" value="${dateKey()}"></label><label class="field">滿分<input name="maxScore" type="number" min="1" value="20" required></label><label class="field">權重（%）<input name="weight" type="number" min="0" max="100" value="10" required></label></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">建立評量</button></div></form>`, onReady(modal, close) { modal.querySelector("[data-close]").onclick = close; modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget), id = uniqueId("assessment"); store.update(draft => { draft.assessments.push({ id, name: String(data.get("name")), type: String(data.get("type")), date: String(data.get("date")), maxScore: Number(data.get("maxScore")), weight: Number(data.get("weight")) }); draft.students.forEach(student => { draft.scores[student.id] ||= {}; draft.scores[student.id][id] = null; }); }); close(); initGrades(); toast("評量已建立，可直接輸入成績。"); }; }});
+  openModal({ title: "新增評量", subtitle: "評量權重用來換算學期表現，可稍後調整。", body: `<form><div class="form-grid"><label class="field full-field">評量名稱<input name="name" required placeholder="例如：酸鹼指示劑實驗"></label><label class="field">類型<select name="type"><option>形成性</option><option>實作</option><option>總結性</option></select></label><label class="field">日期<input name="date" type="date" value="${dateKey()}"></label><label class="field">滿分<input name="maxScore" type="number" min="1" value="20" required></label><label class="field">權重（%）<input name="weight" type="number" min="0" max="100" value="10" required></label></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">建立評量</button></div></form>`, onReady(modal, close) { modal.querySelector("[data-close]").onclick = close; modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget), id = uniqueId("assessment"); store.update(draft => { draft.assessments.push({ id, name: String(data.get("name")), type: String(data.get("type")), date: String(data.get("date")), maxScore: Number(data.get("maxScore")), weight: Number(data.get("weight")) }); activeStudents(draft).forEach(student => { draft.scores[student.id] ||= {}; draft.scores[student.id][id] = null; }); }); close(); initGrades(); toast("評量已建立，可直接輸入成績。"); }; }});
 }
 
 function exportGrades() {
-  const state = store.get(); const rows = [["座號", "姓名", ...state.assessments.map(item => `${item.name}（/${item.maxScore}）`), "加權平均"], ...state.students.map(student => [student.seat, student.name, ...state.assessments.map(item => state.scores[student.id]?.[item.id] ?? ""), studentAverage(student.id, state)?.toFixed(1) || ""])]; download(`自然科成績簿-${dateKey()}.csv`, "\ufeff" + rows.map(row => row.map(csvEscape).join(",")).join("\n"), "text/csv;charset=utf-8"); toast("成績簿已匯出。");
+  const state = store.get(); const currentClass = activeClass(state); const rows = [["學生編號", "座號", ...state.assessments.map(item => `${item.name}（/${item.maxScore}）`), "加權平均"], ...activeStudents(state).map(student => [student.number, student.seat, ...state.assessments.map(item => state.scores[student.id]?.[item.id] ?? ""), studentAverage(student.id, state)?.toFixed(1) || ""])]; download(`${currentClass.code}-自然科成績簿-${dateKey()}.csv`, "\ufeff" + rows.map(row => row.map(csvEscape).join(",")).join("\n"), "text/csv;charset=utf-8"); toast("成績簿已匯出。");
 }
 
 let timerState = { remaining: 300, initial: 300, running: false, interval: null };
@@ -453,8 +548,8 @@ function initTools() {
 
 function renderTimer() { const minutes = Math.floor(timerState.remaining / 60), seconds = timerState.remaining % 60; $("#timer-display").textContent = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`; $('[data-action="timer-toggle"]').textContent = timerState.running ? "暫停" : "開始"; }
 function toggleTimer() { if (timerState.running) { clearInterval(timerState.interval); timerState.running = false; renderTimer(); return; } timerState.running = true; timerState.interval = setInterval(() => { timerState.remaining--; if (timerState.remaining <= 0) { timerState.remaining = 0; timerState.running = false; clearInterval(timerState.interval); toast("時間到！請完成紀錄並整理器材。"); } renderTimer(); }, 1000); renderTimer(); }
-function pickRandomStudent() { const state = store.get(); const attendance = getTodayAttendance(state); let pool = state.students.filter(student => !$("#exclude-absent").checked || attendance[student.id] !== "absent"); const recent = state.toolHistory.recentlyPicked || []; const fresh = pool.filter(student => !recent.slice(-Math.min(5, pool.length - 1)).includes(student.id)); if (fresh.length) pool = fresh; const student = pool[Math.floor(Math.random() * pool.length)]; if (!student) return toast("目前沒有可抽選的學生。", "error"); store.update(draft => { draft.toolHistory.recentlyPicked.push(student.id); draft.toolHistory.recentlyPicked = draft.toolHistory.recentlyPicked.slice(-20); }); $("#random-result").innerHTML = `<small>${student.seat} 號</small><strong>${esc(student.name)}</strong>`; }
-function makeGroups() { const size = Math.max(2, Math.min(8, Number($("#group-size").value) || 4)); const state = store.get(); const attendance = getTodayAttendance(state); const pool = state.students.filter(student => attendance[student.id] !== "absent").sort(() => Math.random() - .5); const groupCount = Math.ceil(pool.length / size); const groups = Array.from({ length: groupCount }, () => []); pool.forEach((student, index) => groups[index % groupCount].push(student)); $("#group-preview").innerHTML = groups.map((group, index) => `<div class="group-box"><strong>第 ${index + 1} 組</strong>${group.map(student => `<span>${esc(student.name)}</span>`).join("")}</div>`).join(""); }
+function pickRandomStudent() { const state = store.get(); const attendance = getTodayAttendance(state); let pool = activeStudents(state).filter(student => !$("#exclude-absent").checked || attendance[student.id] !== "absent"); const recent = state.toolHistory.recentlyPicked || []; const fresh = pool.filter(student => !recent.slice(-Math.min(5, pool.length - 1)).includes(student.id)); if (fresh.length) pool = fresh; const student = pool[Math.floor(Math.random() * pool.length)]; if (!student) return toast("目前沒有可抽選的學生。", "error"); store.update(draft => { draft.toolHistory.recentlyPicked.push(student.id); draft.toolHistory.recentlyPicked = draft.toolHistory.recentlyPicked.slice(-20); }); $("#random-result").innerHTML = `<small>${student.seat} 號</small><strong>${esc(student.number)}</strong>`; }
+function makeGroups() { const size = Math.max(2, Math.min(8, Number($("#group-size").value) || 4)); const state = store.get(); const attendance = getTodayAttendance(state); const pool = activeStudents(state).filter(student => attendance[student.id] !== "absent").sort(() => Math.random() - .5); const groupCount = Math.ceil(pool.length / size); const groups = Array.from({ length: groupCount }, () => []); pool.forEach((student, index) => groups[index % groupCount].push(student)); $("#group-preview").innerHTML = groups.map((group, index) => `<div class="group-box"><strong>第 ${index + 1} 組</strong>${group.map(student => `<span>${esc(student.number)}</span>`).join("")}</div>`).join(""); }
 function rollDice() { const dice = $("#dice"); dice.classList.remove("rolling"); void dice.offsetWidth; dice.classList.add("rolling"); let count = 0; const interval = setInterval(() => { dice.textContent = Math.floor(Math.random() * 6) + 1; if (++count >= 7) clearInterval(interval); }, 55); }
 function stopwatchText(ms) { const tenths = Math.floor(ms / 100) % 10, totalSeconds = Math.floor(ms / 1000); return `${String(Math.floor(totalSeconds / 60)).padStart(2, "0")}:${String(totalSeconds % 60).padStart(2, "0")}.${tenths}`; }
 function toggleStopwatch() { if (stopwatch.running) { stopwatch.elapsed += Date.now() - stopwatch.startedAt; clearInterval(stopwatch.interval); stopwatch.running = false; } else { stopwatch.startedAt = Date.now(); stopwatch.running = true; stopwatch.interval = setInterval(() => $("#stopwatch-display").textContent = stopwatchText(stopwatch.elapsed + Date.now() - stopwatch.startedAt), 100); } $('[data-action="stopwatch-toggle"]').textContent = stopwatch.running ? "暫停" : "開始"; }
@@ -557,14 +652,14 @@ async function removeResource(id) { const item = store.get().resources.find(reso
 function showLinkModal() { openModal({ title: "新增教學連結", body: `<form><div class="form-grid"><label class="field full-field">名稱<input name="name" required></label><label class="field full-field">網址<input name="url" type="url" placeholder="https://" required></label><label class="field">分類<select name="category"><option>連結</option><option>教材</option><option>評量</option></select></label><label class="field">標籤<input name="tags" placeholder="模擬, 酸鹼"></label></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">新增</button></div></form>`, onReady(modal, close) { modal.querySelector("[data-close]").onclick = close; modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget); store.update(draft => draft.resources.unshift({ id: uniqueId("link"), name: String(data.get("name")), url: String(data.get("url")), category: String(data.get("category")), type: "link", size: 0, createdAt: new Date().toISOString(), tags: String(data.get("tags") || "").split(/[,，]/).map(item => item.trim()).filter(Boolean) })); close(); initResources(); toast("教學連結已新增。"); }; }}); }
 
 function initReports() {
-  const state = store.get(); const attendance = getTodayAttendance(state); const attendanceRate = Object.values(attendance).filter(value => value !== "absent").length / state.students.length * 100; const classAvg = classAverage(state); const supportCount = state.observations.filter(item => item.level === "support").length;
-  $("#report-stats").innerHTML = [statCard("今日到課率", `${attendanceRate.toFixed(0)}%`, "遲到列入到課、另行標記", "到"), statCard("班級加權平均", classAvg.toFixed(1), "已有成績學生", "均"), statCard("正向回饋事件", state.rewards.ledger.filter(item => item.value > 0).length, "完整流水帳可追溯", "＋"), statCard("需要支持紀錄", supportCount, "僅教師可見", "記")].join("");
+  const state = store.get(); const students = activeStudents(state); const studentIds = new Set(students.map(student => student.id)); const attendance = getTodayAttendance(state); const attendanceRate = students.length ? students.filter(student => attendance[student.id] !== "absent").length / students.length * 100 : 0; const classAvg = classAverage(state); const supportCount = state.observations.filter(item => studentIds.has(item.studentId) && item.level === "support").length;
+  $("#report-stats").innerHTML = [statCard("今日到課率", `${attendanceRate.toFixed(0)}%`, "遲到列入到課、另行標記", "到"), statCard("班級加權平均", classAvg.toFixed(1), "已有成績學生", "均"), statCard("正向回饋事件", state.rewards.ledger.filter(item => studentIds.has(item.studentId) && item.value > 0).length, "完整流水帳可追溯", "＋"), statCard("需要支持紀錄", supportCount, "僅教師可見", "記")].join("");
   const averages = state.assessments.map(item => ({ ...item, average: assessmentAverage(item.id, state) }));
   $("#assessment-chart").setAttribute("aria-label", `各評量平均：${averages.map(item => `${item.name} ${item.average.toFixed(1)}分`).join("，")}`);
   $("#assessment-chart").innerHTML = averages.map(item => `<div class="chart-column"><span class="value" style="--bar-height:${item.average}%">${item.average.toFixed(0)}</span><i class="column" style="height:${item.average}%"></i><label>${esc(item.name)}</label></div>`).join("");
   const first = averages[0]?.average || 0, last = averages.at(-1)?.average || 0; $("#assessment-chart-summary").textContent = last >= first ? `從第一項到最近一項評量，班級平均上升 ${(last - first).toFixed(1)} 個百分點。` : `最近一項評量較第一項低 ${(first - last).toFixed(1)} 個百分點，建議檢視題型與學習難點。`;
-  const categoryCounts = {}; state.rewards.ledger.filter(item => item.value > 0).forEach(item => categoryCounts[item.category] = (categoryCounts[item.category] || 0) + 1); const entries = Object.entries(categoryCounts).sort((a,b) => b[1]-a[1]); const total = entries.reduce((sum, [, count]) => sum + count, 0) || 1; const colors = ["#176b52", "#c7e66a", "#f3b94e", "#5d9ecf", "#e87964"]; let cursor = 0; const stops = entries.map(([, count], index) => { const start = cursor; cursor += count / total * 100; return `${colors[index % colors.length]} ${start}% ${cursor}%`; }).join(","); $("#reward-chart").innerHTML = `<div class="donut" style="background:conic-gradient(${stops})"><strong>${total}</strong></div><div class="chart-legend">${entries.map(([name, count], index) => `<span><i style="background:${colors[index % colors.length]}"></i><b>${esc(name)}</b><strong>${Math.round(count / total * 100)}%</strong></span>`).join("")}</div>`;
-  const pendingStudents = state.students.filter(student => state.assessments.some(item => state.scores[student.id]?.[item.id] == null)); const lowStudents = state.students.filter(student => (studentAverage(student.id, state) || 100) < 70); $("#teaching-insights").innerHTML = `<article class="insight-card"><strong>延續優勢</strong><p>「${esc(topCategory(state))}」是目前最常被看見的正向行為，可讓學生分享具體策略。</p></article><article class="insight-card warning"><strong>完成缺漏</strong><p>${pendingStudents.length} 位學生尚有成績缺漏，建議用短任務補齊證據。</p></article><article class="insight-card support"><strong>差異化支持</strong><p>${lowStudents.length || "目前沒有"} 位學生加權平均低於 70；先檢視單項概念，不以總分貼標籤。</p></article>`;
+  const categoryCounts = {}; state.rewards.ledger.filter(item => studentIds.has(item.studentId) && item.value > 0).forEach(item => categoryCounts[item.category] = (categoryCounts[item.category] || 0) + 1); const entries = Object.entries(categoryCounts).sort((a,b) => b[1]-a[1]); const rawTotal = entries.reduce((sum, [, count]) => sum + count, 0); const denominator = rawTotal || 1; const colors = ["#176b52", "#c7e66a", "#f3b94e", "#5d9ecf", "#e87964"]; let cursor = 0; const stops = entries.length ? entries.map(([, count], index) => { const start = cursor; cursor += count / denominator * 100; return `${colors[index % colors.length]} ${start}% ${cursor}%`; }).join(",") : "#edf3ef 0% 100%"; $("#reward-chart").innerHTML = `<div class="donut" style="background:conic-gradient(${stops})"><strong>${rawTotal}</strong></div><div class="chart-legend">${entries.length ? entries.map(([name, count], index) => `<span><i style="background:${colors[index % colors.length]}"></i><b>${esc(name)}</b><strong>${Math.round(count / denominator * 100)}%</strong></span>`).join("") : '<span class="muted">目前尚無正向回饋紀錄</span>'}</div>`;
+  const pendingStudents = students.filter(student => state.assessments.some(item => state.scores[student.id]?.[item.id] == null)); const lowStudents = students.filter(student => (studentAverage(student.id, state) || 100) < 70); $("#teaching-insights").innerHTML = `<article class="insight-card"><strong>延續優勢</strong><p>「${esc(topCategory(state))}」是目前最常被看見的正向行為，可讓學生分享具體策略。</p></article><article class="insight-card warning"><strong>完成缺漏</strong><p>${pendingStudents.length} 位學生尚有成績缺漏，建議用短任務補齊證據。</p></article><article class="insight-card support"><strong>差異化支持</strong><p>${lowStudents.length || "目前沒有"} 位學生加權平均低於 70；先檢視單項概念，不以總分貼標籤。</p></article>`;
   $('[data-action="print-report"]').onclick = () => window.print();
   $('[data-action="create-doc-report"]').onclick = async () => { try { toast("正在建立 Google Docs 報告…"); const result = await createGoogleDocReport(); window.open(result.url, "_blank", "noopener"); toast("Google Docs 報告已建立。"); } catch (error) { toast(error.message, "error"); } };
   $('[data-action="create-student-doc"]').onclick = showStudentReportModal;
@@ -572,7 +667,7 @@ function initReports() {
 
 function showStudentReportModal() {
   const state = store.get();
-  openModal({ title: "建立個別學生報告", subtitle: "成績、點數與教師觀察會分區呈現。", body: `<form><label class="field">學生<select name="studentId">${state.students.map(student => `<option value="${student.id}">${student.seat}. ${esc(student.name)}</option>`).join("")}</select></label><div class="notice privacy-notice"><strong>隱私提醒</strong><span>報告會建立在教師的 Google Drive，分享前請確認學校個資規範與共用權限。</span></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">建立 Google Docs</button></div></form>`, onReady(modal, close) {
+  openModal({ title: "建立個別學生報告", subtitle: "成績、點數與教師觀察會分區呈現。", body: `<form><label class="field">學生<select name="studentId">${activeStudents(state).map(student => `<option value="${student.id}">${student.seat} 號 · ${esc(student.number)}</option>`).join("")}</select></label><div class="notice privacy-notice"><strong>隱私提醒</strong><span>報告只使用學生編號；建立在教師的 Google Drive 後，分享前仍請確認學校個資規範與共用權限。</span></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">建立 Google Docs</button></div></form>`, onReady(modal, close) {
     modal.querySelector("[data-close]").onclick = close;
     modal.querySelector("form").onsubmit = async event => { event.preventDefault(); try { const studentId = String(new FormData(event.currentTarget).get("studentId")); toast("正在建立個別學生報告…"); const result = await createStudentGoogleDocReport(studentId); close(); window.open(result.url, "_blank", "noopener"); toast("個別學生報告已建立。"); } catch (error) { toast(error.message, "error"); } };
   }});

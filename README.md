@@ -2,18 +2,24 @@
 
 給台灣國中小自然科教師使用的輕量課堂工作台。把點名、正向回饋、成績、課堂小工具、教材與 Google Workspace 備份集中在同一個入口。
 
-## 已完成的 MVP
+## 立即使用
+
+正式網站：[https://prayer168.github.io/nature-classroom-hub/](https://prayer168.github.io/nature-classroom-hub/)
+
+系統預設使用瀏覽器本機儲存，不會把教師輸入的學生資料送到 GitHub。若要啟用 Google Sheets、Docs 與 Drive，請由教師自行部署 Apps Script 橋接器。
+
+## 已完成的 1.0 功能
 
 - 今日課堂：到課／遲到／缺席、課堂任務、即時觀察與正向點數。
-- 教室座位圖：依「自然教室一」實際配置呈現 5 張實驗桌與 30 個座位，可直接點名、加點與查看學生摘要。
+- 教室座位圖：依「自然教室一」實際配置呈現 5 張實驗桌與 30 個座位，可直接點名、個人／小組加點與查看學生摘要。
 - 學生與班級：新增、編輯、刪除、搜尋、CSV 匯入與匯出。
 - 正向獎勵：個人或多人加點、兌換選單、完整流水帳。
 - 成績與評量：自訂滿分與權重、直接輸入成績、加權平均、CSV 匯出。
-- 自然課工具：倒數計時、碼表、公平點名、分組、骰子、實驗安全檢核。
-- 教學資料庫：IndexedDB 離線檔案、外部連結、搜尋、分類、下載與刪除。
-- 報表：出席、評量趨勢、回饋類型與教學行動建議。
-- 備份：完整 JSON 備份／還原。
-- Google Workspace：Apps Script 範本可同步 Sheets、備份 Drive、產生 Docs 報告並嵌入 Sites。
+- 自然課工具：倒數計時、碼表、公平點名、分組、骰子、實驗安全檢核、QR Code 與即時音量燈。
+- 教學資料庫：IndexedDB 離線檔案、外部連結、搜尋、分類、下載、刪除與單檔 Drive 備份。
+- 報表：出席、評量趨勢、回饋類型、教學行動建議，以及班級／個別學生 Google Docs。
+- 備份：完整 JSON 本機備份／還原，以及 Google Drive 最新備份還原。
+- Google Workspace：Apps Script 範本可同步 Sheets、備份／還原 Drive、上傳教材、產生 Docs 報告並嵌入 Sites。
 
 ## 本機啟動
 
@@ -31,7 +37,7 @@ npm run build
 npm run preview
 ```
 
-產物會輸出至 `dist/`，可部署到 GitHub Pages 或其他 HTTPS 靜態空間，再嵌入 Google Sites。
+產物會輸出至 `dist/`。推送到 `main` 後，GitHub Actions 會自動部署到 GitHub Pages，也可再嵌入 Google Sites。
 
 ## Google 串接
 
@@ -52,6 +58,7 @@ npm run preview
 - [資料模型](docs/data-model.md)
 - [測試報告](docs/test-report.md)
 - [自然教室一原配置圖](assets/images/classroom-layout-reference.jpg)
+- [中英文分享文案](share/facebook-post.html)
 
 ## 授權
 

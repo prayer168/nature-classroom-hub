@@ -13,6 +13,7 @@
 const APP_NAME = '自然課堂中控站';
 const PROP_SHEET_ID = 'NATURE_HUB_SHEET_ID';
 const PROP_FOLDER_ID = 'NATURE_HUB_FOLDER_ID';
+const PROP_LATEST_BACKUP_ID = 'NATURE_HUB_LATEST_BACKUP_ID';
 
 function setupNatureHub() {
   const properties = PropertiesService.getScriptProperties();
@@ -70,6 +71,7 @@ function doPost(e) {
     const request = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     if (request.action === 'sync') return json_(syncPayload_(request.payload));
     if (request.action === 'createClassReport') return json_(createClassReport_(request.payload));
+    if (request.action === 'createStudentReport') return json_(createStudentReport_(request.payload, request.studentId));
     if (request.action === 'uploadFile') return json_(uploadFile_(request.payload));
     return json_({ ok: false, error: '不支援的 action。' });
   } catch (error) {
@@ -108,7 +110,8 @@ function syncPayload_(payload) {
 
   const backupName = `backup-${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd-HHmmss')}.json`;
   const backupBlob = Utilities.newBlob(JSON.stringify(payload, null, 2), 'application/json', backupName);
-  resources.folder.createFile(backupBlob);
+  const backupFile = resources.folder.createFile(backupBlob);
+  PropertiesService.getScriptProperties().setProperty(PROP_LATEST_BACKUP_ID, backupFile.getId());
 
   return { ok: true, sheetUrl: spreadsheet.getUrl(), backupName, syncedAt: new Date().toISOString() };
 }
@@ -140,6 +143,41 @@ function createClassReport_(payload) {
   const file = DriveApp.getFileById(doc.getId());
   file.moveTo(resources.folder);
   return { ok: true, url: doc.getUrl(), id: doc.getId() };
+}
+
+function createStudentReport_(payload, studentId) {
+  validatePayload_(payload);
+  const student = payload.students.find(item => item.id === studentId);
+  if (!student) throw new Error('找不到指定學生。');
+  const resources = ensureSetup_();
+  const className = (payload.classes && payload.classes[0] && payload.classes[0].name) || '班級';
+  const doc = DocumentApp.create(`${student.name}－自然科學習報告－${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd')}`);
+  const body = doc.getBody();
+  body.appendParagraph('自然科個別學習報告').setHeading(DocumentApp.ParagraphHeading.TITLE);
+  body.appendParagraph(`${className}｜${student.seat} 號 ${student.name}`);
+  body.appendParagraph(`學習單元：${payload.lesson && payload.lesson.topic ? payload.lesson.topic : '未設定單元'}`);
+  body.appendParagraph(`產生時間：${new Date().toLocaleString()}`);
+
+  body.appendParagraph('學習摘要').setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  body.appendListItem(`目前加權平均：${calculateAverage_(student.id, payload)}`);
+  body.appendListItem(`目前獎勵點數：${calculatePoints_(student.id, payload)}`);
+
+  body.appendParagraph('評量表現').setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  const scoreMap = (payload.scores && payload.scores[student.id]) || {};
+  const scoreRows = [['評量', '類型', '得分', '滿分', '權重']];
+  (payload.assessments || []).forEach(item => scoreRows.push([item.name, item.type || '', scoreMap[item.id] === null || scoreMap[item.id] === undefined ? '待補' : String(scoreMap[item.id]), String(item.maxScore), `${item.weight}%`]));
+  body.appendTable(scoreRows);
+
+  body.appendParagraph('正向回饋與觀察').setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  const observations = (payload.observations || []).filter(item => item.studentId === student.id).slice(0, 20);
+  if (!observations.length) body.appendParagraph('目前尚無觀察紀錄。');
+  observations.forEach(item => body.appendListItem(`${item.category}${item.note ? `：${item.note}` : ''}`));
+  body.appendParagraph('說明：獎勵點數與學業成績分開呈現，不直接納入學業平均。').setItalic(true);
+
+  doc.saveAndClose();
+  const file = DriveApp.getFileById(doc.getId());
+  file.moveTo(resources.folder);
+  return { ok: true, url: doc.getUrl(), id: doc.getId(), studentId: student.id };
 }
 
 function uploadFile_(payload) {
@@ -206,11 +244,15 @@ function calculateAverage_(studentId, payload) {
 }
 
 function readSnapshot_() {
-  const resources = ensureSetup_();
-  return { sheetUrl: resources.spreadsheet.getUrl(), folderUrl: resources.folder.getUrl(), readAt: new Date().toISOString() };
+  ensureSetup_();
+  const fileId = PropertiesService.getScriptProperties().getProperty(PROP_LATEST_BACKUP_ID);
+  if (!fileId) throw new Error('Google Drive 尚無備份，請先執行一次「立即同步」。');
+  const text = DriveApp.getFileById(fileId).getBlob().getDataAsString('UTF-8');
+  const payload = JSON.parse(text);
+  validatePayload_(payload);
+  return payload;
 }
 
 function json_(data) {
   return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
 }
-

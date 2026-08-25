@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#176b52">
+  <title>分享文案｜自然課堂中控站</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <main class="page narrow-page" style="margin:0 auto;padding-top:3rem">
+    <header class="page-header"><div><p class="eyebrow">SHARE KIT</p><h1>自然課堂中控站分享文案</h1><p>中英文版本皆已包含正式網站連結，可直接複製使用。</p></div><a class="btn btn-primary" href="../index.html">開啟網站</a></header>
+    <section class="settings-stack">
+      <article class="card"><div class="card-head"><div><p class="section-kicker">繁體中文</p><h2>給自然科教師的課堂中控站</h2></div><button class="btn btn-light" data-copy="zh-copy">複製</button></div><div id="zh-copy"><p>自然課的點名、正向回饋、成績統計與教學工具，現在可以集中在同一個入口！🌱</p><p>「自然課堂中控站」包含互動座位圖、小組加點、計時與公平點名、QR Code、教室音量燈、教材資料庫，以及 Google Sheets／Docs／Drive 串接範本。資料預設留在自己的瀏覽器，教師可自行決定何時備份到 Google。</p><p>立即體驗：<br>https://prayer168.github.io/nature-classroom-hub/</p><p>#自然科教學 #數位教學 #班級經營 #形成性評量 #GoogleWorkspace</p></div></article>
+      <article class="card"><div class="card-head"><div><p class="section-kicker">ENGLISH</p><h2>A practical science classroom command center</h2></div><button class="btn btn-light" data-copy="en-copy">Copy</button></div><div id="en-copy" lang="en"><p>Attendance, positive feedback, assessment tracking, and everyday teaching tools—now in one science classroom hub. 🌱</p><p>Nature Classroom Hub includes an interactive seating map, group rewards, timers, fair student selection, QR codes, a classroom sound meter, a teaching resource library, and optional Google Sheets, Docs, and Drive integration. Classroom data stays in the teacher's browser by default.</p><p>Try it here:<br>https://prayer168.github.io/nature-classroom-hub/</p><p>#ScienceTeaching #EdTech #ClassroomManagement #FormativeAssessment</p></div></article>
+    </section>
+  </main>
+  <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  <script type="module">
+    document.querySelectorAll("[data-copy]").forEach(button => button.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).innerText);
+      const toast = document.createElement("div");
+      toast.className = "toast";
+      toast.textContent = button.dataset.copy === "zh-copy" ? "中文文案已複製。" : "English copy copied.";
+      document.getElementById("toast-region").append(toast);
+      setTimeout(() => toast.remove(), 2500);
+    }));
+  </script>
+</body>
+</html>

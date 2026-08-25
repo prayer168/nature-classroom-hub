@@ -1,7 +1,8 @@
 import { renderChrome } from "./chrome.js";
 import { store, getTodayAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, uniqueId, dateKey } from "./store.js";
 import { saveFile, getFile, deleteFile } from "./resource-db.js";
-import { pingGoogle, syncToGoogle, createGoogleDocReport } from "./google-bridge.js";
+import QRCode from "qrcode";
+import { pingGoogle, syncToGoogle, fetchGoogleBackup, uploadFileToGoogle, createGoogleDocReport, createStudentGoogleDocReport } from "./google-bridge.js";
 
 const page = document.body.dataset.page;
 const classroomReferenceUrl = new URL("../assets/images/classroom-layout-reference.jpg", import.meta.url).href;
@@ -199,6 +200,7 @@ function initClassroom() {
   $$(".seat-button").forEach(button => button.onclick = () => showSeatModal(Number(button.dataset.seat), button.dataset.studentId || null));
   $$("[data-zone]").forEach(button => button.onclick = () => showZoneModal(button.dataset.zone));
   $('[data-action="show-layout-reference"]').onclick = showLayoutReference;
+  $('[data-action="group-points"]').onclick = showGroupPointModal;
   $('[data-action="classroom-project"]').onclick = () => {
     document.body.classList.toggle("classroom-projecting");
     const projecting = document.body.classList.contains("classroom-projecting");
@@ -297,6 +299,35 @@ function showPointModalForOne(studentId) {
   }});
 }
 
+function showGroupPointModal() {
+  const state = store.get();
+  openModal({
+    title: "實驗桌小組加點",
+    subtitle: "依自然教室實際座位配置，同步為該桌已安排的學生加點。",
+    body: `<form><div class="form-grid"><label class="field full-field">選擇實驗桌<select name="tableId">${Object.entries(classroomTables).map(([id, table]) => `<option value="${id}">${table.label}（座號 ${table.seats.join("、")}）</option>`).join("")}</select></label><label class="field">回饋類型<select name="category"><option>合作學習</option><option>探究精神</option><option>安全操作</option><option>清楚表達</option></select></label><label class="field">每人點數<input name="value" type="number" min="1" max="10" value="1" required></label><label class="field full-field">具體行為<textarea name="note" rows="3" placeholder="例如：分工清楚，能共同檢查實驗紀錄"></textarea></label></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">全組加點</button></div></form>`,
+    onReady(modal, close) {
+      modal.querySelector("[data-close]").onclick = close;
+      modal.querySelector("form").onsubmit = event => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        const table = classroomTables[String(data.get("tableId"))];
+        const students = state.students.filter(student => table.seats.includes(Number(student.seat)));
+        if (!students.length) return toast("這張實驗桌目前沒有已安排的學生。", "error");
+        const category = String(data.get("category"));
+        const value = Number(data.get("value"));
+        const note = String(data.get("note") || "");
+        store.update(draft => students.forEach(student => {
+          draft.rewards.ledger.unshift({ id: uniqueId("reward"), studentId: student.id, category, value, note: `${table.label}｜${note}`.replace(/｜$/, ""), createdAt: new Date().toISOString() });
+          draft.observations.unshift({ id: uniqueId("obs"), studentId: student.id, category, level: "positive", note, lesson: draft.lesson.topic, createdAt: new Date().toISOString() });
+        }));
+        close();
+        initClassroom();
+        toast(`${table.label}共 ${students.length} 位學生，各獲得 ${value} 點。`);
+      };
+    }
+  });
+}
+
 function exportStudents() {
   const state = store.get(); const attendance = getTodayAttendance(state);
   const rows = [["座號", "姓名", "今日狀態", "點數", "學業平均", "標籤"], ...state.students.map(student => [student.seat, student.name, statusLabel[attendance[student.id]], studentPoints(student.id, state), studentAverage(student.id, state)?.toFixed(1) || "", student.tags.join(";")])];
@@ -379,6 +410,7 @@ function exportGrades() {
 
 let timerState = { remaining: 300, initial: 300, running: false, interval: null };
 let stopwatch = { elapsed: 0, running: false, startedAt: 0, interval: null };
+let soundMeter = { stream: null, context: null, frame: null, running: false };
 
 function initTools() {
   renderTimer();
@@ -393,6 +425,9 @@ function initTools() {
   $('[data-action="stopwatch-lap"]').onclick = addLap;
   $('[data-action="stopwatch-reset"]').onclick = resetStopwatch;
   $('[data-action="reset-safety"]').onclick = () => { $$("#safety-checks input").forEach(input => input.checked = false); toast("安全檢核已重設。"); };
+  $('[data-action="sound-toggle"]').onclick = toggleSoundMeter;
+  $('[data-action="make-qr"]').onclick = makeQrCode;
+  $('[data-action="download-qr"]').onclick = downloadQrCode;
   $('[data-action="project-mode"]').onclick = () => { document.body.classList.toggle("projecting"); $('[data-action="project-mode"]').textContent = document.body.classList.contains("projecting") ? "離開投影模式" : "進入投影模式"; };
 }
 
@@ -406,8 +441,87 @@ function toggleStopwatch() { if (stopwatch.running) { stopwatch.elapsed += Date.
 function addLap() { const value = stopwatch.elapsed + (stopwatch.running ? Date.now() - stopwatch.startedAt : 0); const li = document.createElement("li"); li.textContent = `分段 ${$("#lap-list").children.length + 1}　${stopwatchText(value)}`; $("#lap-list").prepend(li); }
 function resetStopwatch() { clearInterval(stopwatch.interval); stopwatch = { elapsed: 0, running: false, startedAt: 0, interval: null }; $("#stopwatch-display").textContent = "00:00.0"; $("#lap-list").innerHTML = ""; $('[data-action="stopwatch-toggle"]').textContent = "開始"; }
 
+async function toggleSoundMeter() {
+  if (soundMeter.running) return stopSoundMeter();
+  if (!navigator.mediaDevices?.getUserMedia) return toast("此瀏覽器不支援麥克風音量分析。", "error");
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false }, video: false });
+    const context = new AudioContext();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 1024;
+    context.createMediaStreamSource(stream).connect(analyser);
+    soundMeter = { stream, context, analyser, frame: null, running: true };
+    $('[data-action="sound-toggle"]').textContent = "停止音量燈";
+    const samples = new Float32Array(analyser.fftSize);
+    const update = () => {
+      analyser.getFloatTimeDomainData(samples);
+      const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
+      const db = rms ? 20 * Math.log10(rms) : -60;
+      const level = Math.max(0, Math.min(100, Math.round((db + 60) / 60 * 100)));
+      const status = level < 38 ? "安靜" : level < 68 ? "適中" : "偏大聲";
+      const fill = $("#sound-meter-fill");
+      fill.style.width = `${level}%`;
+      fill.dataset.level = status;
+      $("#sound-level").textContent = `相對音量 ${level}%`;
+      $("#sound-status").textContent = status === "偏大聲" ? "偏大聲，請降低討論音量" : `${status}，適合目前課堂活動`;
+      soundMeter.frame = requestAnimationFrame(update);
+    };
+    update();
+  } catch (error) {
+    toast(error.name === "NotAllowedError" ? "未取得麥克風權限，音量燈無法啟動。" : `音量燈啟動失敗：${error.message}`, "error");
+  }
+}
+
+function stopSoundMeter() {
+  cancelAnimationFrame(soundMeter.frame);
+  soundMeter.stream?.getTracks().forEach(track => track.stop());
+  soundMeter.context?.close();
+  soundMeter = { stream: null, context: null, frame: null, running: false };
+  $('[data-action="sound-toggle"]').textContent = "啟動音量燈";
+  $("#sound-meter-fill").style.width = "0%";
+  $("#sound-level").textContent = "尚未啟動";
+  $("#sound-status").textContent = "啟動後顯示安靜、適中或偏大聲";
+}
+
+async function makeQrCode() {
+  const value = $("#qr-url").value.trim();
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol)) throw new Error();
+    const canvas = document.createElement("canvas");
+    canvas.setAttribute("aria-label", `QR Code：${value}`);
+    await QRCode.toCanvas(canvas, value, { width: 220, margin: 2, color: { dark: "#0b3d2e", light: "#ffffff" } });
+    $("#qr-preview").replaceChildren(canvas);
+    $('[data-action="download-qr"]').disabled = false;
+    toast("QR Code 已產生。");
+  } catch {
+    toast("請輸入完整的 http 或 https 網址。", "error");
+  }
+}
+
+function downloadQrCode() {
+  const canvas = $("#qr-preview canvas");
+  if (!canvas) return toast("請先產生 QR Code。", "error");
+  const link = document.createElement("a");
+  link.download = `自然課堂-QR-${dateKey()}.png`;
+  link.href = canvas.toDataURL("image/png");
+  link.click();
+}
+
 function initResources() {
-  const render = () => { const state = store.get(); const query = $("#resource-search").value.trim().toLowerCase(), category = $("#resource-category").value; const resources = state.resources.filter(item => `${item.name}${item.category}${(item.tags || []).join(" ")}`.toLowerCase().includes(query) && (category === "all" || item.category === category)); $("#resource-grid").innerHTML = resources.map(item => `<article class="resource-card"><div class="resource-preview">${item.type === "link" ? "WEB" : esc(item.name.split(".").pop().slice(0, 5))}</div><h2>${esc(item.name)}</h2><p class="resource-meta">${esc(item.category)} · ${item.size ? humanSize(item.size) : "外部連結"}<br>${formatDate(item.createdAt)}</p><div class="resource-actions">${item.type === "link" ? `<a href="${esc(item.url)}" target="_blank" rel="noopener">開啟</a>` : `<button data-download-resource="${item.id}">下載</button>`}<button data-delete-resource="${item.id}">刪除</button></div></article>`).join(""); $("#resource-empty").hidden = resources.length > 0; $$('[data-download-resource]').forEach(button => button.onclick = () => downloadResource(button.dataset.downloadResource)); $$('[data-delete-resource]').forEach(button => button.onclick = () => removeResource(button.dataset.deleteResource)); };
+  const render = () => {
+    const state = store.get();
+    const query = $("#resource-search").value.trim().toLowerCase(), category = $("#resource-category").value;
+    const resources = state.resources.filter(item => `${item.name}${item.category}${(item.tags || []).join(" ")}`.toLowerCase().includes(query) && (category === "all" || item.category === category));
+    $("#resource-grid").innerHTML = resources.map(item => {
+      const cloudAction = item.type !== "file" ? "" : item.driveUrl ? `<a href="${esc(item.driveUrl)}" target="_blank" rel="noopener">開啟 Drive</a>` : state.settings.appsScriptUrl ? `<button data-upload-drive="${item.id}">上傳 Drive</button>` : "";
+      return `<article class="resource-card"><div class="resource-preview">${item.type === "link" ? "WEB" : esc(item.name.split(".").pop().slice(0, 5))}</div><h2>${esc(item.name)}</h2><p class="resource-meta">${esc(item.category)} · ${item.size ? humanSize(item.size) : "外部連結"}<br>${formatDate(item.createdAt)}${item.cloudSyncedAt ? "<br>已備份至 Google Drive" : ""}</p><div class="resource-actions">${item.type === "link" ? `<a href="${esc(item.url)}" target="_blank" rel="noopener">開啟</a>` : `<button data-download-resource="${item.id}">下載</button>`}${cloudAction}<button data-delete-resource="${item.id}">刪除</button></div></article>`;
+    }).join("");
+    $("#resource-empty").hidden = resources.length > 0;
+    $$('[data-download-resource]').forEach(button => button.onclick = () => downloadResource(button.dataset.downloadResource));
+    $$('[data-upload-drive]').forEach(button => button.onclick = () => uploadResourceToDrive(button.dataset.uploadDrive));
+    $$('[data-delete-resource]').forEach(button => button.onclick = () => removeResource(button.dataset.deleteResource));
+  };
   $("#storage-mode-title").textContent = store.get().settings.appsScriptUrl ? "Google 串接已設定" : "離線資料庫";
   $("#storage-mode-copy").textContent = store.get().settings.appsScriptUrl ? "結構化資料可手動同步；檔案上傳 Drive 請依設定指南部署最新版 Apps Script。" : "檔案只儲存在這台裝置的瀏覽器；可在設定中連接 Google Drive。";
   $('[data-action="upload-resource"]').onclick = () => $("#resource-file-input").click();
@@ -418,6 +532,7 @@ function initResources() {
 function humanSize(bytes) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`; return `${(bytes / 1048576).toFixed(1)} MB`; }
 function inferCategory(file) { if (/sheet|excel|csv/i.test(`${file.type} ${file.name}`)) return "評量"; if (/worksheet|學習單/i.test(file.name)) return "學習單"; if (/student|作品/i.test(file.name)) return "學生作品"; return "教材"; }
 async function downloadResource(id) { const record = await getFile(id); if (!record) return toast("找不到離線檔案，可能已清除瀏覽器資料。", "error"); download(record.name, record.blob, record.type); }
+async function uploadResourceToDrive(id) { try { const record = await getFile(id); if (!record) throw new Error("找不到離線檔案，可能已清除瀏覽器資料。"); toast("正在上傳到 Google Drive…"); const result = await uploadFileToGoogle(record.blob, record.name, record.type); store.update(draft => { const item = draft.resources.find(resource => resource.id === id); if (item) { item.driveId = result.id; item.driveUrl = result.url; item.cloudSyncedAt = new Date().toISOString(); } }); initResources(); toast("檔案已備份至 Google Drive。"); } catch (error) { toast(error.message, "error"); } }
 async function removeResource(id) { const item = store.get().resources.find(resource => resource.id === id); if (store.get().settings.confirmDelete && !confirm(`確定刪除「${item?.name}」？`)) return; if (item?.type === "file") await deleteFile(id); store.update(draft => { draft.resources = draft.resources.filter(resource => resource.id !== id); }); initResources(); toast("資料已刪除。"); }
 function showLinkModal() { openModal({ title: "新增教學連結", body: `<form><div class="form-grid"><label class="field full-field">名稱<input name="name" required></label><label class="field full-field">網址<input name="url" type="url" placeholder="https://" required></label><label class="field">分類<select name="category"><option>連結</option><option>教材</option><option>評量</option></select></label><label class="field">標籤<input name="tags" placeholder="模擬, 酸鹼"></label></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">新增</button></div></form>`, onReady(modal, close) { modal.querySelector("[data-close]").onclick = close; modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget); store.update(draft => draft.resources.unshift({ id: uniqueId("link"), name: String(data.get("name")), url: String(data.get("url")), category: String(data.get("category")), type: "link", size: 0, createdAt: new Date().toISOString(), tags: String(data.get("tags") || "").split(/[,，]/).map(item => item.trim()).filter(Boolean) })); close(); initResources(); toast("教學連結已新增。"); }; }}); }
 
@@ -432,6 +547,15 @@ function initReports() {
   const pendingStudents = state.students.filter(student => state.assessments.some(item => state.scores[student.id]?.[item.id] == null)); const lowStudents = state.students.filter(student => (studentAverage(student.id, state) || 100) < 70); $("#teaching-insights").innerHTML = `<article class="insight-card"><strong>延續優勢</strong><p>「${esc(topCategory(state))}」是目前最常被看見的正向行為，可讓學生分享具體策略。</p></article><article class="insight-card warning"><strong>完成缺漏</strong><p>${pendingStudents.length} 位學生尚有成績缺漏，建議用短任務補齊證據。</p></article><article class="insight-card support"><strong>差異化支持</strong><p>${lowStudents.length || "目前沒有"} 位學生加權平均低於 70；先檢視單項概念，不以總分貼標籤。</p></article>`;
   $('[data-action="print-report"]').onclick = () => window.print();
   $('[data-action="create-doc-report"]').onclick = async () => { try { toast("正在建立 Google Docs 報告…"); const result = await createGoogleDocReport(); window.open(result.url, "_blank", "noopener"); toast("Google Docs 報告已建立。"); } catch (error) { toast(error.message, "error"); } };
+  $('[data-action="create-student-doc"]').onclick = showStudentReportModal;
+}
+
+function showStudentReportModal() {
+  const state = store.get();
+  openModal({ title: "建立個別學生報告", subtitle: "成績、點數與教師觀察會分區呈現。", body: `<form><label class="field">學生<select name="studentId">${state.students.map(student => `<option value="${student.id}">${student.seat}. ${esc(student.name)}</option>`).join("")}</select></label><div class="notice privacy-notice"><strong>隱私提醒</strong><span>報告會建立在教師的 Google Drive，分享前請確認學校個資規範與共用權限。</span></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">建立 Google Docs</button></div></form>`, onReady(modal, close) {
+    modal.querySelector("[data-close]").onclick = close;
+    modal.querySelector("form").onsubmit = async event => { event.preventDefault(); try { const studentId = String(new FormData(event.currentTarget).get("studentId")); toast("正在建立個別學生報告…"); const result = await createStudentGoogleDocReport(studentId); close(); window.open(result.url, "_blank", "noopener"); toast("個別學生報告已建立。"); } catch (error) { toast(error.message, "error"); } };
+  }});
 }
 
 function initSettings() {
@@ -439,6 +563,7 @@ function initSettings() {
   $('[data-action="save-integration"]').onclick = async () => { const url = $("#apps-script-url").value.trim(); if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec/.test(url)) return toast("網址格式不符，請貼上以 /exec 結尾的 Apps Script Web App 網址。", "error"); try { toast("正在測試 Google 連線…"); await pingGoogle(url); store.update(draft => { draft.settings.appsScriptUrl = url; }); updateGoogleStatus(); toast("Google 串接設定成功。"); } catch (error) { toast(`測試失敗：${error.message}`, "error"); } };
   $('[data-action="sync-now"]').onclick = async () => { try { toast("正在同步資料…"); await syncToGoogle(); updateGoogleStatus(); toast("資料已同步到 Google Sheets。"); } catch (error) { toast(error.message, "error"); } };
   $('[data-action="export-backup"]').onclick = () => { download(`自然課堂中控站備份-${dateKey()}.json`, JSON.stringify(store.get(), null, 2), "application/json"); toast("完整 JSON 備份已下載。"); };
+  $('[data-action="restore-google"]').onclick = async () => { if (!confirm("從 Google 還原會覆蓋目前的本機班級資料，是否繼續？")) return; try { toast("正在讀取 Google 最新備份…"); const result = await fetchGoogleBackup(); store.replace(result.payload); initSettings(); toast("已從 Google Drive 最新備份還原。"); } catch (error) { toast(error.message, "error"); } };
   $("#backup-file").onchange = async event => { try { const next = JSON.parse(await event.target.files[0].text()); if (!confirm("還原會覆蓋目前的班級資料，是否繼續？")) return; store.replace(next); initSettings(); toast("備份已成功還原。"); } catch (error) { toast(error.message || "無法讀取備份。", "error"); } event.target.value = ""; };
   $('[data-action="reset-demo"]').onclick = () => { if (!confirm("確定重設為示範資料？目前所有本機班級紀錄會被覆蓋。")) return; store.reset(); initSettings(); toast("已重設示範資料。"); };
   [["#private-observations", "privateObservations"], ["#positive-only", "positiveOnly"], ["#confirm-delete", "confirmDelete"]].forEach(([selector, key]) => $(selector).onchange = event => store.update(draft => { draft.settings[key] = event.target.checked; }));

@@ -42,7 +42,9 @@ npm run preview
 
 ## Google 串接
 
-請依 [Google Workspace 串接指南](docs/google-integration.md) 部署 `integrations/apps-script/Code.gs`。未完成 Google 授權前，系統會保持本機模式，不會聲稱資料已同步。
+請依 [Google Workspace 串接指南](docs/google-integration.md) 部署 `integrations/apps-script/Code.gs`（目前 `SCRIPT_VERSION = 2.1.0`）。未完成 Google 授權前，系統會保持本機模式，不會聲稱資料已同步。
+
+部署後請到「串接與設定 → 連線診斷」執行**唯讀診斷**與**寫入測試**：前者檢查指令碼版本、10 個 Sheets 分頁欄位、Drive 資料夾與最新備份；後者實際建立並自動刪除暫存分頁、Drive 檔案與 Google 文件，驗證三種寫入權限。診斷結果可一鍵複製成純文字。
 
 ## 設計原則
 

@@ -2,7 +2,7 @@ import { renderChrome } from "./chrome.js";
 import { store, activeClass, activeStudents, studentNumberFor, getTodayAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, uniqueId, dateKey } from "./store.js";
 import { saveFile, getFile, deleteFile } from "./resource-db.js";
 import QRCode from "qrcode";
-import { pingGoogle, syncToGoogle, fetchGoogleBackup, uploadFileToGoogle, createGoogleDocReport, createStudentGoogleDocReport } from "./google-bridge.js";
+import { pingGoogle, syncToGoogle, fetchGoogleBackup, uploadFileToGoogle, createGoogleDocReport, createStudentGoogleDocReport, diagnoseGoogle, selfTestGoogle, isValidAppsScriptUrl, compareScriptVersion, EXPECTED_SCRIPT_VERSION } from "./google-bridge.js";
 
 const page = document.body.dataset.page;
 const classroomReferenceUrl = new URL("../assets/images/classroom-layout-reference.jpg", import.meta.url).href;
@@ -675,7 +675,8 @@ function showStudentReportModal() {
 
 function initSettings() {
   const state = store.get(); $("#apps-script-url").value = state.settings.appsScriptUrl || ""; $("#private-observations").checked = state.settings.privateObservations; $("#positive-only").checked = state.settings.positiveOnly; $("#confirm-delete").checked = state.settings.confirmDelete; updateGoogleStatus();
-  $('[data-action="save-integration"]').onclick = async () => { const url = $("#apps-script-url").value.trim(); if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec/.test(url)) return toast("網址格式不符，請貼上以 /exec 結尾的 Apps Script Web App 網址。", "error"); try { toast("正在測試 Google 連線…"); await pingGoogle(url); store.update(draft => { draft.settings.appsScriptUrl = url; }); updateGoogleStatus(); toast("Google 串接設定成功。"); } catch (error) { toast(`測試失敗：${error.message}`, "error"); } };
+  $('[data-action="save-integration"]').onclick = async () => { const url = $("#apps-script-url").value.trim(); if (!isValidAppsScriptUrl(url)) return toast("網址格式不符，請貼上以 /exec 結尾的 Apps Script Web App 網址。", "error"); try { toast("正在測試 Google 連線…"); const result = await pingGoogle(url); store.update(draft => { draft.settings.appsScriptUrl = url; }); updateGoogleStatus(); renderPingResult(result); toast(compareScriptVersion(result.scriptVersion) < 0 ? `連線成功，但 Apps Script 仍是舊版 ${result.scriptVersion || "未知"}，請重新部署。` : "Google 串接設定成功。", compareScriptVersion(result.scriptVersion) < 0 ? "error" : "success"); } catch (error) { toast(`測試失敗：${error.message}`, "error"); renderDiagnostics([{ ok: false, label: "連線測試", detail: error.message }], { ok: false }); } };
+  initDiagnostics();
   $('[data-action="sync-now"]').onclick = async () => { try { toast("正在同步資料…"); await syncToGoogle(); updateGoogleStatus(); toast("資料已同步到 Google Sheets。"); } catch (error) { toast(error.message, "error"); } };
   $('[data-action="export-backup"]').onclick = () => { download(`自然課堂中控站備份-${dateKey()}.json`, JSON.stringify(store.get(), null, 2), "application/json"); toast("完整 JSON 備份已下載。"); };
   $('[data-action="restore-google"]').onclick = async () => { if (!confirm("從 Google 還原會覆蓋目前的本機班級資料，是否繼續？")) return; try { toast("正在讀取 Google 最新備份…"); const result = await fetchGoogleBackup(); store.replace(result.payload); initSettings(); toast("已從 Google Drive 最新備份還原。"); } catch (error) { toast(error.message, "error"); } };
@@ -685,6 +686,89 @@ function initSettings() {
 }
 
 function updateGoogleStatus() { const state = store.get(), connected = Boolean(state.settings.appsScriptUrl); $("#google-status").textContent = connected ? "已設定" : "尚未連接"; $("#google-status").className = `status-pill ${connected ? "status-connected" : "status-local"}`; $("#last-sync").textContent = state.settings.lastSyncAt ? `最後成功同步：${formatDate(state.settings.lastSyncAt)}` : "尚無成功同步紀錄。"; }
+
+let lastDiagnosticsReport = "";
+
+function initDiagnostics() {
+  const list = $("#diagnostics-list");
+  if (!list) return;
+  $('[data-action="run-diagnostics"]').onclick = () => runDiagnostics("readonly");
+  $('[data-action="run-selftest"]').onclick = () => runDiagnostics("write");
+  $('[data-action="copy-diagnostics"]').onclick = async () => {
+    if (!lastDiagnosticsReport) return toast("請先執行一次診斷。", "error");
+    try { await navigator.clipboard.writeText(lastDiagnosticsReport); toast("診斷結果已複製，可直接貼到問題回報。"); }
+    catch (error) { toast("瀏覽器不允許複製，請手動選取畫面內容。", "error"); }
+  };
+}
+
+async function runDiagnostics(mode) {
+  const url = $("#apps-script-url").value.trim() || store.get().settings.appsScriptUrl;
+  if (!isValidAppsScriptUrl(url)) return toast("請先貼上以 /exec 結尾的 Apps Script Web App 網址。", "error");
+  const buttons = $$('#diagnostics-card button');
+  buttons.forEach(button => { button.disabled = true; });
+  setDiagnosticsStatus("檢測中…", "status-local");
+  $("#diagnostics-list").innerHTML = `<li class="is-note">${mode === "write" ? "正在執行寫入測試，Apps Script 需要建立與刪除測試檔案，約需 10–30 秒…" : "正在執行唯讀診斷…"}</li>`;
+  try {
+    const result = mode === "write"
+      ? await selfTestGoogle({ keepArtifacts: $("#keep-artifacts").checked, url })
+      : await diagnoseGoogle(url);
+    const items = mode === "write" ? (result.steps || []) : (result.checks || []);
+    renderDiagnostics([versionCheck(result.scriptVersion), ...items], result, mode);
+  } catch (error) {
+    renderDiagnostics([{ ok: false, label: mode === "write" ? "寫入測試" : "唯讀診斷", detail: error.message }], { ok: false }, mode);
+    toast(error.message, "error");
+  } finally {
+    buttons.forEach(button => { button.disabled = false; });
+  }
+}
+
+function versionCheck(actual) {
+  const comparison = compareScriptVersion(actual);
+  if (comparison === 0) return { ok: true, label: "Apps Script 版本", detail: `${actual}（與前端相符）` };
+  if (comparison < 0) return { ok: false, label: "Apps Script 版本", detail: `部署中的版本為 ${actual || "未知"}，前端需要 ${EXPECTED_SCRIPT_VERSION}。請把最新 Code.gs 貼回 Apps Script，並在「管理部署作業」重新部署為新版本。` };
+  return { ok: true, label: "Apps Script 版本", detail: `${actual}（比前端 ${EXPECTED_SCRIPT_VERSION} 新，功能相容）` };
+}
+
+function renderPingResult(result) {
+  renderDiagnostics([versionCheck(result.scriptVersion), { ok: true, label: "Web App 回應", detail: `${result.app || "Apps Script"}｜伺服器時間 ${result.serverTime || "—"}` }], result, "ping");
+}
+
+function setDiagnosticsStatus(text, className) {
+  const pill = $("#diagnostics-status");
+  if (!pill) return;
+  pill.textContent = text;
+  pill.className = `status-pill ${className}`;
+}
+
+function renderDiagnostics(items, result = {}, mode = "readonly") {
+  const list = $("#diagnostics-list");
+  if (!list) return;
+  const passed = items.filter(item => item.ok).length;
+  const allOk = items.length > 0 && passed === items.length;
+  setDiagnosticsStatus(allOk ? `全部通過（${passed}/${items.length}）` : `${items.length - passed} 項未通過`, allOk ? "status-connected" : "status-warn");
+  list.innerHTML = items.map(item => `<li class="${item.ok ? "is-pass" : "is-fail"}"><span class="diag-icon" aria-hidden="true">${item.ok ? "✓" : "✕"}</span><span class="diag-label"><strong>${esc(item.label)}</strong><small>${esc(item.detail || "")}</small></span><span class="diag-meta">${typeof item.ms === "number" ? `${item.ms} ms` : ""}${item.url ? `<a href="${esc(item.url)}" target="_blank" rel="noopener">開啟</a>` : ""}</span></li>`).join("");
+
+  const summary = $("#diagnostics-summary");
+  const facts = [
+    result.effectiveUser ? `執行身分：${result.effectiveUser}` : "",
+    result.timeZone ? `指令碼時區：${result.timeZone}` : "",
+    result.serverTime ? `伺服器時間：${result.serverTime}` : "",
+    result.keptArtifacts ? "測試產物已保留在 Drive 資料夾，請自行刪除。" : "",
+    (result.artifacts || []).map(item => `${item.label}：${item.url}`).join("\n")
+  ].filter(Boolean);
+  summary.hidden = !facts.length;
+  summary.className = `diagnostics-summary ${allOk ? "" : "is-fail"}`;
+  summary.innerHTML = facts.map(fact => `<span>${esc(fact)}</span>`).join("");
+
+  const title = mode === "write" ? "寫入測試" : mode === "ping" ? "連線測試" : "唯讀診斷";
+  lastDiagnosticsReport = [
+    `自然課堂中控站 ${title} 結果`,
+    `前端預期 Apps Script 版本：${EXPECTED_SCRIPT_VERSION}`,
+    ...facts,
+    "",
+    ...items.map(item => `[${item.ok ? "PASS" : "FAIL"}] ${item.label}｜${item.detail || ""}${item.url ? `｜${item.url}` : ""}`)
+  ].join("\n");
+}
 
 function initPage() {
   if (page === "dashboard") initDashboard();

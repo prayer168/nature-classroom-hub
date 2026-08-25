@@ -1,91 +1,171 @@
 import { store } from "./store.js";
 
-export async function pingGoogle(url = store.get().settings.appsScriptUrl) {
-  if (!url) throw new Error("請先輸入 Apps Script Web App 網址。");
+/** 前端預期的 Apps Script 版本。Code.gs 的 SCRIPT_VERSION 低於此值代表使用者尚未重新部署。 */
+export const EXPECTED_SCRIPT_VERSION = "2.1.0";
+
+const DEFAULT_TIMEOUT = 30_000;
+const SYNC_TIMEOUT = 60_000;
+const URL_PATTERN = /^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/[^/]+\/exec/;
+
+export function isValidAppsScriptUrl(url) {
+  return URL_PATTERN.test(String(url || "").trim());
+}
+
+export function compareScriptVersion(actual, expected = EXPECTED_SCRIPT_VERSION) {
+  const parse = value => String(value || "0").split(".").map(part => Number(part) || 0);
+  const [a, b] = [parse(actual), parse(expected)];
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const diff = (a[index] || 0) - (b[index] || 0);
+    if (diff !== 0) return diff < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+function requireUrl(url = store.get().settings.appsScriptUrl) {
+  const value = String(url || "").trim();
+  if (!value) throw new Error("尚未設定 Google Apps Script 網址，請先在上方貼上並儲存。");
+  return value;
+}
+
+function withQuery(url, params) {
   const separator = url.includes("?") ? "&" : "?";
-  const response = await fetch(`${url}${separator}action=ping&ts=${Date.now()}`, { redirect: "follow" });
-  if (!response.ok) throw new Error(`連線失敗（HTTP ${response.status}）`);
-  const result = await response.json();
-  if (!result.ok) throw new Error(result.error || "Apps Script 沒有回傳成功狀態。");
+  const query = Object.entries({ ...params, ts: Date.now() })
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join("&");
+  return `${url}${separator}${query}`;
+}
+
+/**
+ * 統一的 Apps Script 呼叫入口。
+ * 負責逾時中斷、把 Google 登入頁／權限錯誤頁轉成看得懂的訊息，並統一回傳 JSON。
+ */
+async function callAppsScript(url, { method = "GET", body = null, timeoutMs = DEFAULT_TIMEOUT, label = "連線" } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(url, {
+      method,
+      redirect: "follow",
+      signal: controller.signal,
+      // 使用 text/plain 可避免瀏覽器送出 preflight，Apps Script 不接受 OPTIONS。
+      ...(body === null ? {} : { headers: { "Content-Type": "text/plain;charset=utf-8" }, body })
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error(`${label}逾時（超過 ${Math.round(timeoutMs / 1000)} 秒）。資料量大時 Apps Script 會較慢，請稍後重試或減少同步範圍。`);
+    }
+    throw new Error(`${label}無法連線：${error.message}。常見原因是網路中斷，或 Web App 存取權限未開放給目前的 Google 帳號。`);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const text = await response.text();
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(`${label}被拒絕（HTTP ${response.status}）。請在 Apps Script「管理部署作業」把存取權限改為學校網域或「知道連結的任何人」，並確認瀏覽器登入的是有權限的 Google 帳號。`);
+    }
+    if (response.status === 404) {
+      throw new Error(`${label}失敗（HTTP 404）。這個 /exec 網址不存在，可能是部署被刪除或網址複製錯誤。`);
+    }
+    throw new Error(`${label}失敗（HTTP ${response.status}）。`);
+  }
+
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error(`${label}沒有收到任何回應內容，請確認 Web App 已重新部署為新版本。`);
+  if (trimmed.startsWith("<")) {
+    if (/accounts\.google\.com|使用者登入|Sign in/i.test(trimmed)) {
+      throw new Error(`${label}被導向 Google 登入頁。請先在同一個瀏覽器登入有權限的 Google 帳號，或把 Web App 存取權限放寬。`);
+    }
+    if (/授權|Authorization|permission/i.test(trimmed)) {
+      throw new Error(`${label}遭遇授權錯誤。請回到 Apps Script 手動執行一次 setupNatureHub() 完成授權，再重新部署。`);
+    }
+    throw new Error(`${label}回傳的是網頁而非資料。多半代表 Web App 未正確部署，或網址不是以 /exec 結尾。`);
+  }
+
+  let result;
+  try {
+    result = JSON.parse(trimmed);
+  } catch (error) {
+    throw new Error(`${label}回應格式無法解析：${trimmed.slice(0, 120)}`);
+  }
+  if (!result || result.ok !== true) {
+    throw new Error((result && result.error) || `${label}失敗，Apps Script 未回傳成功狀態。`);
+  }
   return result;
 }
 
+/* ------------------------------------------------------------ 連線與診斷 */
+
+export async function pingGoogle(url = store.get().settings.appsScriptUrl) {
+  return callAppsScript(withQuery(requireUrl(url), { action: "ping" }), { label: "連線測試" });
+}
+
+/** 唯讀診斷：檢查分頁欄位、Drive 資料夾與最新備份，不寫入任何資料。 */
+export async function diagnoseGoogle(url = store.get().settings.appsScriptUrl) {
+  return callAppsScript(withQuery(requireUrl(url), { action: "diagnose" }), { label: "連線診斷", timeoutMs: SYNC_TIMEOUT });
+}
+
+/** 寫入自我測試：建立暫存分頁、Drive 檔案與 Google 文件後刪除，不影響班級資料。 */
+export async function selfTestGoogle({ keepArtifacts = false, url } = {}) {
+  return callAppsScript(requireUrl(url), {
+    method: "POST",
+    body: JSON.stringify({ action: "selfTest", options: { keepArtifacts } }),
+    timeoutMs: SYNC_TIMEOUT,
+    label: "寫入測試"
+  });
+}
+
+/* ---------------------------------------------------------------- 同步 */
+
 export async function syncToGoogle() {
   const state = store.get();
-  const url = state.settings.appsScriptUrl;
-  if (!url) throw new Error("尚未設定 Google Apps Script 網址。");
-  const response = await fetch(url, {
+  const result = await callAppsScript(requireUrl(state.settings.appsScriptUrl), {
     method: "POST",
-    redirect: "follow",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action: "sync", payload: state })
+    body: JSON.stringify({ action: "sync", payload: state }),
+    timeoutMs: SYNC_TIMEOUT,
+    label: "資料同步"
   });
-  if (!response.ok) throw new Error(`同步失敗（HTTP ${response.status}）`);
-  const result = await response.json();
-  if (!result.ok) throw new Error(result.error || "同步失敗。");
   store.update(draft => { draft.settings.lastSyncAt = new Date().toISOString(); });
   return result;
 }
 
 export async function fetchGoogleBackup() {
-  const url = store.get().settings.appsScriptUrl;
-  if (!url) throw new Error("尚未設定 Google Apps Script 網址。");
-  const separator = url.includes("?") ? "&" : "?";
-  const response = await fetch(`${url}${separator}action=backup&ts=${Date.now()}`, { redirect: "follow" });
-  if (!response.ok) throw new Error(`讀取備份失敗（HTTP ${response.status}）`);
-  const result = await response.json();
-  if (!result.ok || !result.payload) throw new Error(result.error || "Google Drive 尚無可還原的備份。");
-  return result;
+  return callAppsScript(withQuery(requireUrl(), { action: "backup" }), { label: "讀取備份", timeoutMs: SYNC_TIMEOUT });
 }
 
 export async function uploadFileToGoogle(blob, name, mimeType = "application/octet-stream") {
-  const state = store.get();
-  const url = state.settings.appsScriptUrl;
-  if (!url) throw new Error("尚未設定 Google Apps Script 網址。");
-  if (blob.size > 8 * 1024 * 1024) throw new Error("單一檔案請勿超過 8 MB。");
+  const url = requireUrl();
+  if (blob.size > 8 * 1024 * 1024) throw new Error("單一檔案請勿超過 8 MB，大檔請直接上傳 Google Drive。");
   const base64 = await blobToBase64(blob);
-  const response = await fetch(url, {
+  return callAppsScript(url, {
     method: "POST",
-    redirect: "follow",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action: "uploadFile", payload: { name, mimeType: mimeType || blob.type, base64 } })
+    body: JSON.stringify({ action: "uploadFile", payload: { name, mimeType: mimeType || blob.type, base64 } }),
+    timeoutMs: SYNC_TIMEOUT,
+    label: "檔案上傳"
   });
-  if (!response.ok) throw new Error(`檔案上傳失敗（HTTP ${response.status}）`);
-  const result = await response.json();
-  if (!result.ok) throw new Error(result.error || "檔案上傳失敗。");
-  return result;
 }
 
+/* ------------------------------------------------------------ Docs 報告 */
+
 export async function createGoogleDocReport() {
-  const state = store.get();
-  const url = state.settings.appsScriptUrl;
-  if (!url) throw new Error("尚未設定 Google Apps Script 網址。");
-  const response = await fetch(url, {
+  return callAppsScript(requireUrl(), {
     method: "POST",
-    redirect: "follow",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action: "createClassReport", payload: state })
+    body: JSON.stringify({ action: "createClassReport", payload: store.get() }),
+    timeoutMs: SYNC_TIMEOUT,
+    label: "建立班級報告"
   });
-  const result = await response.json();
-  if (!result.ok) throw new Error(result.error || "無法建立 Google Docs 報告。");
-  return result;
 }
 
 export async function createStudentGoogleDocReport(studentId) {
   const state = store.get();
-  const url = state.settings.appsScriptUrl;
-  if (!url) throw new Error("尚未設定 Google Apps Script 網址。");
   if (!state.students.some(student => student.id === studentId)) throw new Error("找不到指定學生。");
-  const response = await fetch(url, {
+  return callAppsScript(requireUrl(), {
     method: "POST",
-    redirect: "follow",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action: "createStudentReport", studentId, payload: state })
+    body: JSON.stringify({ action: "createStudentReport", studentId, payload: state }),
+    timeoutMs: SYNC_TIMEOUT,
+    label: "建立個別報告"
   });
-  if (!response.ok) throw new Error(`建立報告失敗（HTTP ${response.status}）`);
-  const result = await response.json();
-  if (!result.ok) throw new Error(result.error || "無法建立個別學生報告。");
-  return result;
 }
 
 function blobToBase64(blob) {

@@ -5,6 +5,7 @@
 ## 已完成的 MVP
 
 - 今日課堂：到課／遲到／缺席、課堂任務、即時觀察與正向點數。
+- 教室座位圖：依「自然教室一」實際配置呈現 5 張實驗桌與 30 個座位，可直接點名、加點與查看學生摘要。
 - 學生與班級：新增、編輯、刪除、搜尋、CSV 匯入與匯出。
 - 正向獎勵：個人或多人加點、兌換選單、完整流水帳。
 - 成績與評量：自訂滿分與權重、直接輸入成績、加權平均、CSV 匯出。
@@ -50,8 +51,8 @@ npm run preview
 - [同類平台研究](docs/market-research.md)
 - [資料模型](docs/data-model.md)
 - [測試報告](docs/test-report.md)
+- [自然教室一原配置圖](assets/images/classroom-layout-reference.jpg)
 
 ## 授權
 
 MIT
-

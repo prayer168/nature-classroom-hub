@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
 
-const pages = ["index", "students", "rewards", "grades", "tools", "resources", "reports", "settings"];
+const pages = ["index", "classroom", "students", "rewards", "grades", "tools", "resources", "reports", "settings"];
 
 export default defineConfig({
   base: "./",
@@ -11,4 +11,3 @@ export default defineConfig({
     }
   }
 });
-

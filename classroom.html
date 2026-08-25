@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#176b52"><meta name="description" content="自然教室一互動配置與學生座位圖。"><meta property="og:type" content="website"><meta property="og:title" content="教室座位圖｜自然課堂中控站"><meta property="og:image" content="./assets/images/og-cover.jpg"><meta property="og:locale" content="zh_TW"><meta name="twitter:card" content="summary_large_image"><title>教室座位圖｜自然課堂中控站</title><link rel="stylesheet" href="css/style.css"></head>
+<body data-page="classroom"><a class="skip-link" href="#main">跳到主要內容</a><div id="app-shell"></div>
+<main id="main" class="page wide-page" tabindex="-1">
+  <header class="page-header"><div><p class="eyebrow">NATURE CLASSROOM 01</p><h1>自然教室一 · 互動座位圖</h1><p>依實際教室配置安排五張實驗桌；點選座位即可點名、記錄或給予正向回饋。</p></div><div class="page-actions"><button class="btn btn-light" data-action="show-layout-reference">查看原配置圖</button><button class="btn btn-primary" data-action="classroom-project">進入投影模式</button></div></header>
+  <section class="classroom-summary" id="classroom-summary" aria-label="今日教室摘要"></section>
+  <div class="classroom-toolbar card compact"><div class="seat-legend"><span><i class="seat-dot present"></i>到課</span><span><i class="seat-dot late"></i>遲到</span><span><i class="seat-dot absent"></i>缺席</span><span><i class="seat-dot empty"></i>空位</span></div><p class="muted">前方 ↑ 白板與講桌</p></div>
+  <div class="classroom-scroll"><section class="classroom-board" aria-label="自然教室一互動配置">
+    <div class="room-front"><button class="room-zone teacher-zone" data-zone="教師角"><strong>教師角</strong><span>電腦 · 實物投影 · 文件</span></button><div class="whiteboard"><strong>白板</strong><span>今日單元：<b id="classroom-topic"></b></span></div><button class="room-zone aquaponics-zone" data-zone="魚菜共生系統"><strong>魚菜共生系統</strong><span>水質 · 循環 · 生態觀察</span></button></div>
+    <div class="lectern" aria-label="講桌">講桌</div>
+    <button class="room-zone teaching-aids-zone" data-zone="自然教具區"><strong>自然教具區</strong><span>地球科學<br>昆蟲與礦物<br>生物模型</span></button>
+    <div class="lab-table table-a" data-table="A"></div>
+    <div class="lab-table table-b" data-table="B"></div>
+    <div class="lab-table table-c" data-table="C"></div>
+    <div class="lab-table table-d" data-table="D"></div>
+    <button class="room-zone maker-zone" data-zone="新興科技工作坊"><strong>新興科技工作坊</strong><span>3D 列印 · 雷切 · 數位製造</span></button>
+    <div class="lab-table table-e" data-table="E"></div>
+    <button class="room-zone museum-zone" data-zone="自然教具展示區"><strong>自然教具展示區</strong><span>顯微鏡 · 標本 · 岩礦 · 人體與地科模型</span></button>
+    <div class="rear-door" aria-label="後門與走廊"><span>後門</span><strong>走廊 →</strong></div>
+  </section></div>
+  <p class="classroom-help">座位依原配置圖排列。投影模式會隱藏學生姓名與個別狀態，只保留座號與場域配置。</p>
+</main><div id="toast-region" class="toast-region" aria-live="polite"></div><div id="modal-root"></div><script type="module" src="js/app.js"></script></body></html>

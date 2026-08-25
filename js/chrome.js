@@ -2,6 +2,7 @@ import { store } from "./store.js";
 
 const icons = {
   dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>',
+  classroom: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 4h18v16H3z"/><path d="M8 8h3v3H8zM14 8h3v3h-3zM8 14h3v3H8zM14 14h3v3h-3z"/></svg>',
   students: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.2 2.4-5.5 5.5-5.5s5.5 2.3 5.5 5.5"/><circle cx="17" cy="9" r="2.3"/><path d="M15.5 15.2c3.5-.8 5.5 1.2 5.5 4.8"/></svg>',
   rewards: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 2.6 5.3 5.9.9-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9-4.3-4.1 5.9-.9L12 3Z"/></svg>',
   grades: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h4"/></svg>',
@@ -12,7 +13,7 @@ const icons = {
 };
 
 const pages = [
-  ["dashboard", "今日課堂", "index.html"], ["students", "學生與班級", "students.html"],
+  ["dashboard", "今日課堂", "index.html"], ["classroom", "教室座位圖", "classroom.html"], ["students", "學生與班級", "students.html"],
   ["rewards", "正向獎勵", "rewards.html"], ["grades", "成績與評量", "grades.html"],
   ["tools", "課堂工具", "tools.html"], ["resources", "教學資料庫", "resources.html"],
   ["reports", "統計報表", "reports.html"], ["settings", "串接與設定", "settings.html"]
@@ -28,7 +29,7 @@ export function renderChrome() {
       <a class="brand" href="index.html"><span class="brand-mark">N</span><span class="brand-copy"><strong>自然課堂中控站</strong><small>NATURE HUB</small></span></a>
       <p class="nav-label">教學工作台</p>
       <nav class="main-nav" aria-label="主要導覽">
-        ${pages.slice(0, 7).map(([id, label, href]) => `<a class="nav-link ${page === id ? "active" : ""}" href="${href}">${icons[id]}<span>${label}</span></a>`).join("")}
+        ${pages.slice(0, 8).map(([id, label, href]) => `<a class="nav-link ${page === id ? "active" : ""}" href="${href}">${icons[id]}<span>${label}</span></a>`).join("")}
       </nav>
       <div class="sidebar-foot">
         <a class="nav-link ${page === "settings" ? "active" : ""}" href="settings.html">${icons.settings}<span>串接與設定</span></a>
@@ -51,4 +52,3 @@ export function renderChrome() {
     }
   });
 }
-

@@ -2,10 +2,9 @@
   "projectName": "自然課堂中控站",
   "englishName": "Nature Classroom Hub",
   "repositoryName": "nature-classroom-hub",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "locale": "zh-TW",
   "audience": "國小與國中自然科教師",
   "storage": "localStorage + IndexedDB; optional Google Apps Script bridge",
   "deployment": "static web / GitHub Pages / Google Sites embed"
 }
-

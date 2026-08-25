@@ -4,6 +4,7 @@ import { saveFile, getFile, deleteFile } from "./resource-db.js";
 import { pingGoogle, syncToGoogle, createGoogleDocReport } from "./google-bridge.js";
 
 const page = document.body.dataset.page;
+const classroomReferenceUrl = new URL("../assets/images/classroom-layout-reference.jpg", import.meta.url).href;
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const esc = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
@@ -154,6 +155,90 @@ function openLessonModal() {
     modal.querySelector("[data-close]").onclick = close;
     modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget); store.update(draft => { draft.lesson.topic = String(data.get("topic")); draft.lesson.session = String(data.get("session")); draft.lesson.task = String(data.get("task")); }); close(); initDashboard(); toast("課堂資訊已更新。"); };
   }});
+}
+
+const classroomTables = {
+  A: { label: "第一組", seats: [7, 22, 2, 17, 27, 12] },
+  B: { label: "第二組", seats: [6, 21, 1, 16, 26, 11] },
+  C: { label: "第三組", seats: [9, 24, 4, 19, 29, 14] },
+  D: { label: "第四組", seats: [8, 23, 3, 18, 28, 13] },
+  E: { label: "第五組", seats: [10, 25, 5, 20, 30, 15] }
+};
+
+const zoneDetails = {
+  "教師角": { use: "課堂中控、實物投影、教材與教學紀錄管理。", reminder: "投影前先切換投影模式，避免顯示個別學生資料。" },
+  "魚菜共生系統": { use: "觀察水循環、生物交互作用、水質與植物生長。", reminder: "每日確認水位、魚隻狀態與電源；學生操作後要洗手。" },
+  "自然教具區": { use: "地球科學、昆蟲、礦物與生物模型的觀察與分類。", reminder: "標本與模型使用後依標籤歸位，易碎教具由教師或器材長取放。" },
+  "新興科技工作坊": { use: "3D 列印、雷射切割、數位製造與工程設計。", reminder: "高溫與運轉設備需由教師監督，啟動前確認護具與通風。" },
+  "自然教具展示區": { use: "顯微鏡、玻璃器材、岩礦、標本與人體／地科模型展示。", reminder: "長走道保持淨空；玻璃器材與藥品不得放在展示區邊緣。" }
+};
+
+function initClassroom() {
+  const state = store.get();
+  const attendance = getTodayAttendance(state);
+  const assigned = state.students.filter(student => student.seat >= 1 && student.seat <= 30).length;
+  const present = state.students.filter(student => attendance[student.id] === "present").length;
+  const late = state.students.filter(student => attendance[student.id] === "late").length;
+  const absent = state.students.filter(student => attendance[student.id] === "absent").length;
+  $("#classroom-topic").textContent = state.lesson.topic;
+  $("#classroom-summary").innerHTML = [
+    ["配置座位", `${assigned}/30`], ["今日到課", present], ["今日遲到", late], ["今日缺席", absent]
+  ].map(([label, value]) => `<article class="classroom-summary-card"><span>${label}</span><strong>${value}</strong></article>`).join("");
+
+  Object.entries(classroomTables).forEach(([tableId, table]) => {
+    const tableNode = document.querySelector(`[data-table="${tableId}"]`);
+    tableNode.dataset.groupLabel = table.label;
+    tableNode.innerHTML = table.seats.map(seat => {
+      const student = state.students.find(item => Number(item.seat) === seat);
+      const status = student ? attendance[student.id] || "present" : "empty";
+      const label = student ? `${seat} 號 ${student.name}，${statusLabel[status]}` : `${seat} 號空位`;
+      return `<button class="seat-button" data-seat="${seat}" data-student-id="${student?.id || ""}" data-status="${status}" aria-label="${esc(label)}"><span class="seat-number">${seat}</span><span class="seat-name">${esc(student?.name || "空位")}</span></button>`;
+    }).join("");
+  });
+
+  $$(".seat-button").forEach(button => button.onclick = () => showSeatModal(Number(button.dataset.seat), button.dataset.studentId || null));
+  $$("[data-zone]").forEach(button => button.onclick = () => showZoneModal(button.dataset.zone));
+  $('[data-action="show-layout-reference"]').onclick = showLayoutReference;
+  $('[data-action="classroom-project"]').onclick = () => {
+    document.body.classList.toggle("classroom-projecting");
+    const projecting = document.body.classList.contains("classroom-projecting");
+    $('[data-action="classroom-project"]').textContent = projecting ? "離開投影模式" : "進入投影模式";
+    toast(projecting ? "已隱藏學生姓名與個別狀態。" : "已返回教師操作模式。");
+  };
+}
+
+function showSeatModal(seat, studentId) {
+  if (!studentId) {
+    openModal({ title: `${seat} 號座位`, subtitle: "這個座位目前尚未安排學生。", body: `<div class="notice"><strong>空位</strong><span>可到學生與班級頁新增學生，並將座號設為 ${seat}。</span></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>關閉</button><a class="btn btn-primary" href="students.html">前往安排</a></div>`, onReady(modal, close) { modal.querySelector("[data-close]").onclick = close; } });
+    return;
+  }
+  const state = store.get();
+  const student = state.students.find(item => item.id === studentId);
+  const currentStatus = getTodayAttendance(state)[studentId] || "present";
+  const average = studentAverage(studentId, state);
+  openModal({
+    title: `${seat} 號 · ${student.name}`,
+    subtitle: `目前狀態：${statusLabel[currentStatus]}`,
+    body: `<div class="stats-grid"><article class="stat-card"><div class="stat-top"><span>獎勵點數</span></div><div class="stat-value">${studentPoints(studentId, state)}</div><div class="stat-foot">本期可用點數</div></article><article class="stat-card"><div class="stat-top"><span>學業平均</span></div><div class="stat-value">${average?.toFixed(1) || "—"}</div><div class="stat-foot">依目前評量權重</div></article></div><div class="form-grid"><label class="field full-field">更新今日狀態<select id="seat-status"><option value="present" ${currentStatus === "present" ? "selected" : ""}>到課</option><option value="late" ${currentStatus === "late" ? "selected" : ""}>遲到</option><option value="absent" ${currentStatus === "absent" ? "selected" : ""}>缺席</option></select></label></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>關閉</button><button type="button" class="btn btn-secondary" data-seat-point>給予點數</button><button type="button" class="btn btn-primary" data-save-status>儲存狀態</button></div>`,
+    onReady(modal, close) {
+      modal.querySelector("[data-close]").onclick = close;
+      modal.querySelector("[data-seat-point]").onclick = () => { close(); showPointModalForOne(studentId); };
+      modal.querySelector("[data-save-status]").onclick = () => {
+        const status = modal.querySelector("#seat-status").value;
+        store.update(draft => { getTodayAttendance(draft)[studentId] = status; });
+        close(); initClassroom(); toast(`${student.name} 已更新為「${statusLabel[status]}」。`);
+      };
+    }
+  });
+}
+
+function showZoneModal(zone) {
+  const detail = zoneDetails[zone];
+  openModal({ title: zone, subtitle: "自然教室場域說明", body: `<div class="zone-details"><div class="notice"><strong>教學用途</strong><span>${esc(detail.use)}</span></div><div class="notice privacy-notice"><strong>使用提醒</strong><span>${esc(detail.reminder)}</span></div></div><div class="modal-actions"><button type="button" class="btn btn-primary" data-close>知道了</button></div>`, onReady(modal, close) { modal.querySelector("[data-close]").onclick = close; } });
+}
+
+function showLayoutReference() {
+  openModal({ title: "自然教室一 · 原配置圖", subtitle: "由教師提供，互動座位圖依此配置製作。", className: "large", body: `<img class="reference-image" src="${classroomReferenceUrl}" alt="自然教室一配置圖，包含教師角、白板、講桌、魚菜共生系統、自然教具區、新興科技工作坊與五張實驗桌。"><div class="modal-actions"><button type="button" class="btn btn-primary" data-close>關閉</button></div>`, onReady(modal, close) { modal.querySelector("[data-close]").onclick = close; } });
 }
 
 function initStudents() {
@@ -363,6 +448,7 @@ function updateGoogleStatus() { const state = store.get(), connected = Boolean(s
 
 function initPage() {
   if (page === "dashboard") initDashboard();
+  else if (page === "classroom") initClassroom();
   else if (page === "students") initStudents();
   else if (page === "rewards") initRewards();
   else if (page === "grades") initGrades();

@@ -12,6 +12,12 @@ export const classDefinitions = [
   { id: "c508", code: "508", name: "508 班", grade: "五年級", subject: "自然科學", schoolYear: "115 學年度" }
 ];
 
+/** 資源庫的適用範圍：通用資源在所有班級都看得到，年級資源只在該年級的班級出現。 */
+export const RESOURCE_SCOPE_ALL = "通用";
+export const resourceScopes = [RESOURCE_SCOPE_ALL, ...[...new Set(classDefinitions.map(item => item.grade))]];
+
+const defaultLesson = () => ({ topic: "水溶液的酸鹼性", session: "第 3 節", task: "指示劑觀察與紀錄", startedAt: null });
+
 export function studentNumberFor(classCode, seat) {
   const classNumber = Number(String(classCode).slice(1));
   return `${String(classCode)[0]}${classNumber}${String(Number(seat)).padStart(2, "0")}`;
@@ -80,6 +86,22 @@ function normalizeState(nextState) {
   nextState.version = 2;
   nextState.classes = classDefinitions.map(item => ({ ...item }));
   if (!classDefinitions.some(item => item.id === nextState.activeClassId)) nextState.activeClassId = "c402";
+
+  // 課程單元依班級各自獨立；1.3.0 以前只有單一 lesson，載入時複製給每個班級當起點。
+  const legacyLesson = nextState.lesson && typeof nextState.lesson === "object" ? nextState.lesson : null;
+  const lessons = nextState.lessons && typeof nextState.lessons === "object" ? nextState.lessons : {};
+  nextState.lessons = Object.fromEntries(classDefinitions.map(classInfo => {
+    const existing = lessons[classInfo.id];
+    const source = existing || legacyLesson || defaultLesson();
+    return [classInfo.id, { ...defaultLesson(), ...source }];
+  }));
+  delete nextState.lesson;
+
+  // 資源庫依年級分類；沒有標記的舊資料一律視為通用。
+  nextState.resources = (nextState.resources || []).map(item => ({
+    ...item,
+    grade: resourceScopes.includes(item.grade) ? item.grade : RESOURCE_SCOPE_ALL
+  }));
   nextState.students = (nextState.students || []).map(student => {
     const classInfo = classDefinitions.find(item => item.id === student.classId) || classDefinitions[0];
     const number = student.number || studentNumberFor(classInfo.code, student.seat);
@@ -127,7 +149,7 @@ function migrateLegacyState(legacy) {
   next.assessments = Array.isArray(legacy.assessments) ? legacy.assessments : next.assessments;
   next.resources = Array.isArray(legacy.resources) ? legacy.resources : next.resources;
   next.settings = { ...next.settings, ...(legacy.settings || {}) };
-  next.lesson = { ...next.lesson, ...(legacy.lesson || {}) };
+  if (legacy.lesson) next.lesson = { ...defaultLesson(), ...legacy.lesson };
   next.toolHistory = legacy.toolHistory || next.toolHistory;
   return normalizeState(next);
 }
@@ -138,7 +160,7 @@ export const createDemoState = () => {
     version: 2,
     classes: classDefinitions.map(item => ({ ...item })),
     activeClassId: "c402",
-    lesson: { topic: "水溶液的酸鹼性", session: "第 3 節", task: "指示劑觀察與紀錄", startedAt: null },
+    lessons: Object.fromEntries(classDefinitions.map(classInfo => [classInfo.id, defaultLesson()])),
     students,
     attendance: {
       [todayKey()]: Object.fromEntries(students.map(student => [student.id, student.seat === 15 ? "late" : student.seat === 17 ? "absent" : "present"]))
@@ -148,8 +170,8 @@ export const createDemoState = () => {
     assessments: initialAssessments,
     scores: buildScores(students),
     resources: [
-      { id: "link-phet", name: "PhET 互動式模擬", category: "連結", type: "link", url: "https://phet.colorado.edu/zh_TW/", size: 0, createdAt: nowIso(), tags: ["模擬", "外部資源"] },
-      { id: "link-junyi", name: "均一教育平台", category: "連結", type: "link", url: "https://www.junyiacademy.org/", size: 0, createdAt: nowIso(), tags: ["任務", "學習資源"] }
+      { id: "link-phet", name: "PhET 互動式模擬", category: "連結", type: "link", url: "https://phet.colorado.edu/zh_TW/", size: 0, grade: RESOURCE_SCOPE_ALL, createdAt: nowIso(), tags: ["模擬", "外部資源"] },
+      { id: "link-junyi", name: "均一教育平台", category: "連結", type: "link", url: "https://www.junyiacademy.org/", size: 0, grade: RESOURCE_SCOPE_ALL, createdAt: nowIso(), tags: ["任務", "學習資源"] }
     ],
     toolHistory: { recentlyPicked: [] },
     settings: { appsScriptUrl: "", lastSyncAt: null, privateObservations: true, positiveOnly: true, confirmDelete: true },
@@ -216,6 +238,23 @@ export const store = {
 
 export function activeClass(current = state) {
   return current.classes.find(item => item.id === current.activeClassId) || current.classes[0];
+}
+
+/** 目前班級的課程單元。每個班級各自獨立，切換班級即切換單元。 */
+export function activeLesson(current = state) {
+  current.lessons ||= {};
+  current.lessons[current.activeClassId] ||= defaultLesson();
+  return current.lessons[current.activeClassId];
+}
+
+export function activeGrade(current = state) {
+  return activeClass(current)?.grade || "";
+}
+
+/** 目前班級看得到的教學資源：通用資源加上該年級的資源。 */
+export function visibleResources(current = state) {
+  const grade = activeGrade(current);
+  return (current.resources || []).filter(item => item.grade === RESOURCE_SCOPE_ALL || item.grade === grade);
 }
 
 export function activeStudents(current = state) {

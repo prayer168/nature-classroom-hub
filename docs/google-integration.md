@@ -2,8 +2,8 @@
 
 系統以 Google Apps Script Web App 作為前端與 Google Workspace 的橋接層：把班級資料同步到 Google Sheets、在 Drive 建立與還原 JSON 備份、上傳教學檔案，並用 Google Docs 產生班級或個別學生報告。部署後也可以直接嵌入 Google Sites。
 
-> **對應版本**：Apps Script `SCRIPT_VERSION = 2.1.0`，資料 schema v2。
-> 前端會在診斷時比對版本；若顯示「部署中的版本為 2.0.x」，代表 `Code.gs` 改過但沒有重新部署。
+> **對應版本**：Apps Script `SCRIPT_VERSION = 2.2.0`，資料 schema v2。
+> 前端會在診斷時比對版本；若顯示「部署中的版本為 2.1.x」，代表 `Code.gs` 改過但沒有重新部署。
 
 ---
 
@@ -16,7 +16,7 @@
 5. 第一次執行會跳出授權畫面：「查看權限」→ 選擇同一個帳號 → 若出現「Google 尚未驗證這個應用程式」，點「進階」→「前往 自然課堂中控站橋接器（不安全）」→「允許」。
    這是自己寫的指令碼未經 Google 商店審核的正常提示。
 6. 執行紀錄若顯示完成，Drive 會出現：
-   - 試算表「自然課堂中控站－資料庫」（10 個分頁）
+   - 試算表「自然課堂中控站－資料庫」（11 個分頁）
    - 資料夾「自然課堂中控站－教學資料」
 
 ### 需要授權的範圍
@@ -35,7 +35,7 @@
 1. 右上角「部署」→「新增部署作業」。
 2. 齒輪圖示 → 類型選「網頁應用程式」。
 3. 設定：
-   - **說明**：填版本備註，例如 `v2.1.0 診斷 API`
+   - **說明**：填版本備註，例如 `v2.2.0 課程分班`
    - **執行身分**：選「我（你的帳號）」。這樣所有老師都寫入同一份資料庫，也不需要每位使用者各自授權。
    - **誰可以存取**：學校網域環境選「＜學校網域＞內的任何人」；若管理員未開放，才退而選「知道連結的任何人」。
      **不要選「任何人（包含匿名）」以外還把網址公開張貼**——這個網址等同資料庫的寫入權杖。
@@ -61,7 +61,7 @@
 | --- | --- |
 | Apps Script 版本 | 與前端預期版本相符 |
 | Google Sheets 資料庫 | 能開啟、分頁數正確 |
-| 分頁 Classes / Students / Attendance / Rewards / RewardMenu / Assessments / Scores / Observations / Resources / Metadata | 標題列欄位與定義完全一致 |
+| 分頁 Classes / Lessons / Students / Attendance / Rewards / RewardMenu / Assessments / Scores / Observations / Resources / Metadata | 標題列欄位與定義完全一致 |
 | Google Drive 資料夾 | 能開啟並列出檔案數 |
 | 最新 Drive 備份 | 有備份檔並顯示時間與大小（首次執行前會是未通過，屬正常） |
 
@@ -80,7 +80,8 @@
 
 ### 第 4 步：立即同步
 按「立即同步」，然後：
-- 開啟試算表，確認 Classes 有 6 列、Students 有 180 列。
+- 開啟試算表，確認 Classes 與 Lessons 各有 6 列、Students 有 180 列。
+- 確認 `Lessons` 的六列課程單元彼此獨立（各班主題可不同）。
 - **確認 Students 分頁沒有任何真實姓名欄位**（欄位應為 `id, classId, number, seat, tags, note, active, createdAt`）。
 - 確認 Drive 資料夾出現 `backup-YYYYMMDD-HHMMSS.json`。
 
@@ -110,12 +111,13 @@
 | 分頁 | 內容 |
 | --- | --- |
 | Classes | 6 個班級的代碼、年級、科目、學年 |
+| Lessons | 各班獨立的課程單元、課次、今日任務與開始時間 |
 | Students | 學生編號、座號、班級、標籤、備註（**不含姓名**） |
 | Attendance | 逐日逐生出席狀態 |
 | Rewards / RewardMenu | 點數紀錄與獎品目錄 |
 | Assessments / Scores | 評量定義與各生得分 |
 | Observations | 教師觀察紀錄 |
-| Resources | 教學資源清單（連結與檔案中繼資料） |
+| Resources | 教學資源清單（連結與檔案中繼資料），`grade` 標示通用／四年級／五年級 |
 | Metadata | 同步時間、schema 版本、班級與學生數 |
 
 伺服器端會再做一次去識別化：即使前端誤送 `name`、`fullName`、`realName`，寫入 Sheets／Drive 備份／Docs 前都會剝除。
@@ -153,4 +155,4 @@
 - 沒有雙向同步與衝突處理：同步是本機覆蓋雲端，還原是雲端覆蓋本機。
 - 沒有自動排程備份，需手動按「立即同步」。
 - 沒有登入與角色權限，任何取得網址的人皆可寫入。
-- 課程、評量定義、獎品目錄與資源庫目前六班共用，尚未分班／分年級。
+- 評量定義與獎品目錄為六班共用（刻意設計：同一套評量標準較公平、獎品由教師實體準備）。課程單元已依班級獨立，資源庫已依年級分類。

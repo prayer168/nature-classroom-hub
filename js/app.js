@@ -1,5 +1,5 @@
 import { renderChrome } from "./chrome.js";
-import { store, activeClass, activeStudents, studentNumberFor, getTodayAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, uniqueId, dateKey } from "./store.js";
+import { store, activeClass, activeStudents, activeLesson, activeGrade, visibleResources, resourceScopes, RESOURCE_SCOPE_ALL, studentNumberFor, getTodayAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, uniqueId, dateKey } from "./store.js";
 import { saveFile, getFile, deleteFile } from "./resource-db.js";
 import QRCode from "qrcode";
 import { pingGoogle, syncToGoogle, fetchGoogleBackup, uploadFileToGoogle, createGoogleDocReport, createStudentGoogleDocReport, diagnoseGoogle, selfTestGoogle, isValidAppsScriptUrl, compareScriptVersion, EXPECTED_SCRIPT_VERSION } from "./google-bridge.js";
@@ -106,7 +106,7 @@ function showPointModal(defaultCategory = "探究精神", defaultValue = 1, supp
         store.update(draft => {
           ids.forEach(studentId => {
             draft.rewards.ledger.unshift({ id: uniqueId("reward"), studentId, category, value, note, createdAt: new Date().toISOString() });
-            draft.observations.unshift({ id: uniqueId("obs"), studentId, category, level: supportMode ? "support" : "positive", note, lesson: draft.lesson.topic, createdAt: new Date().toISOString() });
+            draft.observations.unshift({ id: uniqueId("obs"), studentId, category, level: supportMode ? "support" : "positive", note, lesson: activeLesson(draft).topic, createdAt: new Date().toISOString() });
           });
         });
         close();
@@ -134,7 +134,10 @@ function initDashboard() {
   $("#quick-attendance").innerHTML = students.map(student => `<button class="student-chip" data-student-id="${student.id}" data-status="${attendance[student.id] || "present"}" aria-label="學生 ${esc(student.number)}，${statusLabel[attendance[student.id]] || "到課"}"><span class="seat">${student.seat} 號</span><strong>${esc(student.number)}</strong></button>`).join("");
   $("#sync-pill").textContent = state.settings.appsScriptUrl ? "Google 待同步" : "本機模式";
   $("#sync-pill").className = `status-pill ${state.settings.appsScriptUrl ? "status-connected" : "status-local"}`;
-  $("#lesson-topic").textContent = state.lesson.topic;
+  const lesson = activeLesson(state);
+  $("#lesson-topic").textContent = lesson.topic;
+  $("#lesson-session").textContent = lesson.session || "—";
+  $("#lesson-task").textContent = lesson.task || "—";
   const weekly = [{ day: "一", a: 92, p: 73 }, { day: "二", a: 96, p: 78 }, { day: "三", a: 96, p: 84 }, { day: "四", a: 100, p: 82 }, { day: "五", a: 94, p: 88 }];
   $("#pulse-chart").innerHTML = weekly.map(item => `<div class="bar-group"><i class="bar" style="height:${item.a}%" title="出席 ${item.a}%"></i><i class="bar secondary" style="height:${item.p}%" title="參與 ${item.p}%"></i><label>週${item.day}</label></div>`).join("");
   $("#pulse-summary").innerHTML = `<strong>本週亮點：</strong> 合作學習回饋比上週增加，探究發表的完成度也正在上升。`;
@@ -149,15 +152,17 @@ function initDashboard() {
   }));
   $$('[data-quick-point]').forEach(button => button.addEventListener("click", () => showPointModal(button.dataset.quickPoint, Number(button.dataset.value), button.dataset.quickPoint === "需要支持")));
   $('[data-action="all-present"]').onclick = () => { store.update(draft => activeStudents(draft).forEach(student => { getTodayAttendance(draft)[student.id] = "present"; })); initDashboard(); toast("已將全班標記為到課。"); };
-  $('[data-action="start-class"]').onclick = () => { store.update(draft => { draft.lesson.startedAt = new Date().toISOString(); }); toast("課堂已開始，祝今天探究順利！"); };
+  $('[data-action="start-class"]').onclick = () => { store.update(draft => { activeLesson(draft).startedAt = new Date().toISOString(); }); toast(`${activeClass(store.get()).name}課堂已開始，祝今天探究順利！`); };
   $('[data-action="edit-lesson"]').onclick = () => openLessonModal();
 }
 
 function openLessonModal() {
-  const lesson = store.get().lesson;
-  openModal({ title: "編輯今日課堂", body: `<form id="lesson-form"><div class="form-grid"><label class="field full-field">單元主題<input name="topic" value="${esc(lesson.topic)}" required></label><label class="field">課次<input name="session" value="${esc(lesson.session)}"></label><label class="field">今日任務<input name="task" value="${esc(lesson.task)}"></label></div><div class="modal-actions"><button class="btn btn-light" type="button" data-close>取消</button><button class="btn btn-primary">儲存</button></div></form>`, onReady(modal, close) {
+  const state = store.get();
+  const lesson = activeLesson(state);
+  const className = activeClass(state).name;
+  openModal({ title: "編輯今日課堂", subtitle: `目前只會更新${className}的課程單元，其他班級不受影響。`, body: `<form id="lesson-form"><div class="form-grid"><label class="field full-field">單元主題<input name="topic" value="${esc(lesson.topic)}" required></label><label class="field">課次<input name="session" value="${esc(lesson.session)}"></label><label class="field">今日任務<input name="task" value="${esc(lesson.task)}"></label></div><div class="modal-actions"><button class="btn btn-light" type="button" data-close>取消</button><button class="btn btn-primary">儲存</button></div></form>`, onReady(modal, close) {
     modal.querySelector("[data-close]").onclick = close;
-    modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget); store.update(draft => { draft.lesson.topic = String(data.get("topic")); draft.lesson.session = String(data.get("session")); draft.lesson.task = String(data.get("task")); }); close(); initDashboard(); toast("課堂資訊已更新。"); };
+    modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget); store.update(draft => { const target = activeLesson(draft); target.topic = String(data.get("topic")); target.session = String(data.get("session")); target.task = String(data.get("task")); }); close(); initDashboard(); toast(`${className}的課堂資訊已更新。`); };
   }});
 }
 
@@ -185,7 +190,7 @@ function initClassroom() {
   const present = students.filter(student => attendance[student.id] === "present").length;
   const late = students.filter(student => attendance[student.id] === "late").length;
   const absent = students.filter(student => attendance[student.id] === "absent").length;
-  $("#classroom-topic").textContent = state.lesson.topic;
+  $("#classroom-topic").textContent = activeLesson(state).topic;
   $("#classroom-summary").innerHTML = [
     ["配置座位", `${assigned}/30`], ["今日到課", present], ["今日遲到", late], ["今日缺席", absent]
   ].map(([label, value]) => `<article class="classroom-summary-card"><span>${label}</span><strong>${value}</strong></article>`).join("");
@@ -383,7 +388,7 @@ function showGroupPointModal() {
         const note = String(data.get("note") || "");
         store.update(draft => students.forEach(student => {
           draft.rewards.ledger.unshift({ id: uniqueId("reward"), studentId: student.id, category, value, note: `${table.label}｜${note}`.replace(/｜$/, ""), createdAt: new Date().toISOString() });
-          draft.observations.unshift({ id: uniqueId("obs"), studentId: student.id, category, level: "positive", note, lesson: draft.lesson.topic, createdAt: new Date().toISOString() });
+          draft.observations.unshift({ id: uniqueId("obs"), studentId: student.id, category, level: "positive", note, lesson: activeLesson(draft).topic, createdAt: new Date().toISOString() });
         }));
         close();
         initClassroom();
@@ -626,30 +631,45 @@ function downloadQrCode() {
 function initResources() {
   const render = () => {
     const state = store.get();
-    const query = $("#resource-search").value.trim().toLowerCase(), category = $("#resource-category").value;
-    const resources = state.resources.filter(item => `${item.name}${item.category}${(item.tags || []).join(" ")}`.toLowerCase().includes(query) && (category === "all" || item.category === category));
+    const query = $("#resource-search").value.trim().toLowerCase(), category = $("#resource-category").value, scope = $("#resource-scope").value;
+    const scoped = scope === "all" ? state.resources : visibleResources(state);
+    const resources = scoped.filter(item => `${item.name}${item.category}${(item.tags || []).join(" ")}`.toLowerCase().includes(query) && (category === "all" || item.category === category));
     $("#resource-grid").innerHTML = resources.map(item => {
       const cloudAction = item.type !== "file" ? "" : item.driveUrl ? `<a href="${esc(item.driveUrl)}" target="_blank" rel="noopener">開啟 Drive</a>` : state.settings.appsScriptUrl ? `<button data-upload-drive="${item.id}">上傳 Drive</button>` : "";
-      return `<article class="resource-card"><div class="resource-preview">${item.type === "link" ? "WEB" : esc(item.name.split(".").pop().slice(0, 5))}</div><h2>${esc(item.name)}</h2><p class="resource-meta">${esc(item.category)} · ${item.size ? humanSize(item.size) : "外部連結"}<br>${formatDate(item.createdAt)}${item.cloudSyncedAt ? "<br>已備份至 Google Drive" : ""}</p><div class="resource-actions">${item.type === "link" ? `<a href="${esc(item.url)}" target="_blank" rel="noopener">開啟</a>` : `<button data-download-resource="${item.id}">下載</button>`}${cloudAction}<button data-delete-resource="${item.id}">刪除</button></div></article>`;
+      return `<article class="resource-card"><div class="resource-preview">${item.type === "link" ? "WEB" : esc(item.name.split(".").pop().slice(0, 5))}</div><span class="resource-scope-tag${item.grade === RESOURCE_SCOPE_ALL ? " is-all" : ""}">${esc(item.grade)}</span><h2>${esc(item.name)}</h2><p class="resource-meta">${esc(item.category)} · ${item.size ? humanSize(item.size) : "外部連結"}<br>${formatDate(item.createdAt)}${item.cloudSyncedAt ? "<br>已備份至 Google Drive" : ""}</p><div class="resource-actions">${item.type === "link" ? `<a href="${esc(item.url)}" target="_blank" rel="noopener">開啟</a>` : `<button data-download-resource="${item.id}">下載</button>`}${cloudAction}<button data-scope-resource="${item.id}">適用範圍</button><button data-delete-resource="${item.id}">刪除</button></div></article>`;
     }).join("");
     $("#resource-empty").hidden = resources.length > 0;
     $$('[data-download-resource]').forEach(button => button.onclick = () => downloadResource(button.dataset.downloadResource));
     $$('[data-upload-drive]').forEach(button => button.onclick = () => uploadResourceToDrive(button.dataset.uploadDrive));
+    $$('[data-scope-resource]').forEach(button => button.onclick = () => showResourceScopeModal(button.dataset.scopeResource));
     $$('[data-delete-resource]').forEach(button => button.onclick = () => removeResource(button.dataset.deleteResource));
   };
   $("#storage-mode-title").textContent = store.get().settings.appsScriptUrl ? "Google 串接已設定" : "離線資料庫";
   $("#storage-mode-copy").textContent = store.get().settings.appsScriptUrl ? "結構化資料可手動同步；檔案上傳 Drive 請依設定指南部署最新版 Apps Script。" : "檔案只儲存在這台裝置的瀏覽器；可在設定中連接 Google Drive。";
   $('[data-action="upload-resource"]').onclick = () => $("#resource-file-input").click();
-  $("#resource-file-input").onchange = async event => { for (const file of event.target.files) { const id = uniqueId("file"); await saveFile(id, file); store.update(draft => draft.resources.unshift({ id, name: file.name, category: inferCategory(file), type: "file", size: file.size, mimeType: file.type, createdAt: new Date().toISOString(), tags: [] })); } render(); event.target.value = ""; toast("檔案已儲存到離線資料庫。"); };
+  $("#resource-file-input").onchange = async event => { const grade = activeGrade(store.get()); for (const file of event.target.files) { const id = uniqueId("file"); await saveFile(id, file); store.update(draft => draft.resources.unshift({ id, name: file.name, category: inferCategory(file), type: "file", size: file.size, mimeType: file.type, grade, createdAt: new Date().toISOString(), tags: [] })); } render(); event.target.value = ""; toast(`檔案已儲存到離線資料庫，適用範圍設為${grade}。`); };
   $('[data-action="add-link"]').onclick = showLinkModal;
-  $("#resource-search").oninput = render; $("#resource-category").onchange = render; render();
+  $("#resource-search").oninput = render; $("#resource-category").onchange = render; $("#resource-scope").onchange = render; render();
+}
+
+function scopeOptions(selected) {
+  return resourceScopes.map(scope => `<option value="${esc(scope)}"${scope === selected ? " selected" : ""}>${esc(scope)}</option>`).join("");
+}
+
+function showResourceScopeModal(id) {
+  const item = store.get().resources.find(resource => resource.id === id);
+  if (!item) return;
+  openModal({ title: "調整適用範圍", subtitle: esc(item.name), body: `<form><label class="field">適用範圍<select name="grade">${scopeOptions(item.grade)}</select></label><p class="muted">「通用」在所有班級都看得到；選擇年級後只有該年級的班級會顯示。</p><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">儲存</button></div></form>`, onReady(modal, close) {
+    modal.querySelector("[data-close]").onclick = close;
+    modal.querySelector("form").onsubmit = event => { event.preventDefault(); const grade = String(new FormData(event.currentTarget).get("grade")); store.update(draft => { const target = draft.resources.find(resource => resource.id === id); if (target) target.grade = grade; }); close(); initResources(); toast(`適用範圍已改為${grade}。`); };
+  }});
 }
 function humanSize(bytes) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`; return `${(bytes / 1048576).toFixed(1)} MB`; }
 function inferCategory(file) { if (/sheet|excel|csv/i.test(`${file.type} ${file.name}`)) return "評量"; if (/worksheet|學習單/i.test(file.name)) return "學習單"; if (/student|作品/i.test(file.name)) return "學生作品"; return "教材"; }
 async function downloadResource(id) { const record = await getFile(id); if (!record) return toast("找不到離線檔案，可能已清除瀏覽器資料。", "error"); download(record.name, record.blob, record.type); }
 async function uploadResourceToDrive(id) { try { const record = await getFile(id); if (!record) throw new Error("找不到離線檔案，可能已清除瀏覽器資料。"); toast("正在上傳到 Google Drive…"); const result = await uploadFileToGoogle(record.blob, record.name, record.type); store.update(draft => { const item = draft.resources.find(resource => resource.id === id); if (item) { item.driveId = result.id; item.driveUrl = result.url; item.cloudSyncedAt = new Date().toISOString(); } }); initResources(); toast("檔案已備份至 Google Drive。"); } catch (error) { toast(error.message, "error"); } }
 async function removeResource(id) { const item = store.get().resources.find(resource => resource.id === id); if (store.get().settings.confirmDelete && !confirm(`確定刪除「${item?.name}」？`)) return; if (item?.type === "file") await deleteFile(id); store.update(draft => { draft.resources = draft.resources.filter(resource => resource.id !== id); }); initResources(); toast("資料已刪除。"); }
-function showLinkModal() { openModal({ title: "新增教學連結", body: `<form><div class="form-grid"><label class="field full-field">名稱<input name="name" required></label><label class="field full-field">網址<input name="url" type="url" placeholder="https://" required></label><label class="field">分類<select name="category"><option>連結</option><option>教材</option><option>評量</option></select></label><label class="field">標籤<input name="tags" placeholder="模擬, 酸鹼"></label></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">新增</button></div></form>`, onReady(modal, close) { modal.querySelector("[data-close]").onclick = close; modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget); store.update(draft => draft.resources.unshift({ id: uniqueId("link"), name: String(data.get("name")), url: String(data.get("url")), category: String(data.get("category")), type: "link", size: 0, createdAt: new Date().toISOString(), tags: String(data.get("tags") || "").split(/[,，]/).map(item => item.trim()).filter(Boolean) })); close(); initResources(); toast("教學連結已新增。"); }; }}); }
+function showLinkModal() { openModal({ title: "新增教學連結", body: `<form><div class="form-grid"><label class="field full-field">名稱<input name="name" required></label><label class="field full-field">網址<input name="url" type="url" placeholder="https://" required></label><label class="field">分類<select name="category"><option>連結</option><option>教材</option><option>評量</option></select></label><label class="field">適用範圍<select name="grade">${scopeOptions(activeGrade(store.get()))}</select></label><label class="field">標籤<input name="tags" placeholder="模擬, 酸鹼"></label></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">新增</button></div></form>`, onReady(modal, close) { modal.querySelector("[data-close]").onclick = close; modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget); store.update(draft => draft.resources.unshift({ id: uniqueId("link"), name: String(data.get("name")), url: String(data.get("url")), category: String(data.get("category")), grade: String(data.get("grade")), type: "link", size: 0, createdAt: new Date().toISOString(), tags: String(data.get("tags") || "").split(/[,，]/).map(item => item.trim()).filter(Boolean) })); close(); initResources(); toast("教學連結已新增。"); }; }}); }
 
 function initReports() {
   const state = store.get(); const students = activeStudents(state); const studentIds = new Set(students.map(student => student.id)); const attendance = getTodayAttendance(state); const attendanceRate = students.length ? students.filter(student => attendance[student.id] !== "absent").length / students.length * 100 : 0; const classAvg = classAverage(state); const supportCount = state.observations.filter(item => studentIds.has(item.studentId) && item.level === "support").length;

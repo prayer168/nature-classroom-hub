@@ -368,9 +368,11 @@ input[type="checkbox"] { width: 1.1rem; height: 1.1rem; accent-color: var(--fore
 .resource-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 1rem; }
 .resource-card { min-height: 205px; display: flex; flex-direction: column; padding: 1rem; border: 1px solid var(--line); border-radius: 17px; background: var(--paper); box-shadow: var(--shadow-sm); }
 .resource-preview { height: 82px; display: grid; place-items: center; margin-bottom: .8rem; border-radius: 12px; color: var(--forest-700); background: linear-gradient(135deg, var(--forest-50), var(--lime-soft)); font-family: var(--number-font); font-size: 1.25rem; font-weight: 800; text-transform: uppercase; }
+.resource-scope-tag { align-self: flex-start; margin-bottom: .35rem; padding: .18rem .5rem; border-radius: 999px; font-size: .66rem; font-weight: 700; color: #8b631d; background: var(--sun-soft); }
+.resource-scope-tag.is-all { color: var(--forest-800); background: var(--forest-50); }
 .resource-card h2 { font-size: .9rem; overflow-wrap: anywhere; }
 .resource-meta { margin: .25rem 0 auto; color: var(--muted); font-size: .7rem; }
-.resource-actions { display: flex; justify-content: space-between; margin-top: .75rem; padding-top: .7rem; border-top: 1px solid var(--line); }
+.resource-actions { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin-top: .75rem; padding-top: .7rem; border-top: 1px solid var(--line); }
 .resource-actions button, .resource-actions a { border: 0; color: var(--forest-700); background: transparent; font-size: .72rem; font-weight: 700; }
 
 .chart-area { min-height: 250px; display: flex; align-items: flex-end; gap: 1rem; padding: 1rem .5rem 2.2rem; border-bottom: 1px solid var(--line); }

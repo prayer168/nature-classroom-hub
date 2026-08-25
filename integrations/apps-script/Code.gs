@@ -15,7 +15,7 @@
  */
 
 const APP_NAME = '自然課堂中控站';
-const SCRIPT_VERSION = '2.1.0';
+const SCRIPT_VERSION = '2.2.0';
 const SCHEMA_VERSION = 2;
 
 const PROP_SHEET_ID = 'NATURE_HUB_SHEET_ID';
@@ -28,6 +28,7 @@ const PROP_LATEST_BACKUP_ID = 'NATURE_HUB_LATEST_BACKUP_ID';
  */
 const SHEET_DEFINITIONS = {
   Classes: ['id', 'code', 'name', 'grade', 'subject', 'schoolYear'],
+  Lessons: ['classId', 'topic', 'session', 'task', 'startedAt'],
   Students: ['id', 'classId', 'number', 'seat', 'tags', 'note', 'active', 'createdAt'],
   Attendance: ['date', 'studentId', 'status'],
   Rewards: ['id', 'studentId', 'category', 'value', 'note', 'createdAt'],
@@ -35,7 +36,7 @@ const SHEET_DEFINITIONS = {
   Assessments: ['id', 'name', 'type', 'maxScore', 'weight', 'date'],
   Scores: ['studentId', 'assessmentId', 'score'],
   Observations: ['id', 'studentId', 'category', 'level', 'note', 'lesson', 'createdAt'],
-  Resources: ['id', 'name', 'category', 'type', 'url', 'size', 'tags', 'createdAt'],
+  Resources: ['id', 'name', 'category', 'grade', 'type', 'url', 'size', 'tags', 'createdAt'],
   Metadata: ['key', 'value']
 };
 
@@ -274,6 +275,10 @@ function syncPayload_(payload) {
   Object.keys(SHEET_DEFINITIONS).forEach(name => ensureSheet_(spreadsheet, name, SHEET_DEFINITIONS[name]));
 
   writeObjects_(spreadsheet, 'Classes', safePayload.classes || []);
+  writeObjects_(spreadsheet, 'Lessons', (safePayload.classes || []).map(item => {
+    const lesson = lessonFor_(safePayload, item.id);
+    return { classId: item.id, topic: lesson.topic, session: lesson.session, task: lesson.task, startedAt: lesson.startedAt };
+  }));
   writeObjects_(spreadsheet, 'Students', safePayload.students || []);
 
   const attendanceRows = [];
@@ -344,7 +349,7 @@ function createClassReport_(payload) {
   const doc = DocumentApp.create(`${className}自然科學習報告－${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd')}`);
   const body = doc.getBody();
   body.appendParagraph('自然科學習報告').setHeading(DocumentApp.ParagraphHeading.TITLE);
-  body.appendParagraph(`${className}｜${safePayload.lesson && safePayload.lesson.topic ? safePayload.lesson.topic : '未設定單元'}`);
+  body.appendParagraph(`${className}｜${lessonFor_(safePayload, safePayload.activeClassId).topic || '未設定單元'}`);
   body.appendParagraph(`產生時間：${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')}`);
 
   body.appendParagraph('班級摘要').setHeading(DocumentApp.ParagraphHeading.HEADING1);
@@ -377,7 +382,7 @@ function createStudentReport_(payload, studentId) {
   const body = doc.getBody();
   body.appendParagraph('自然科個別學習報告').setHeading(DocumentApp.ParagraphHeading.TITLE);
   body.appendParagraph(`${className}｜${student.seat} 號｜學生編號 ${student.number}`);
-  body.appendParagraph(`學習單元：${safePayload.lesson && safePayload.lesson.topic ? safePayload.lesson.topic : '未設定單元'}`);
+  body.appendParagraph(`學習單元：${lessonFor_(safePayload, student.classId).topic || '未設定單元'}`);
   body.appendParagraph(`產生時間：${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')}`);
 
   body.appendParagraph('學習摘要').setHeading(DocumentApp.ParagraphHeading.HEADING1);
@@ -453,6 +458,14 @@ function writeObjects_(spreadsheet, name, objects) {
   sheet.setFrozenRows(1);
   sheet.autoResizeColumns(1, keys.length);
   return sheet;
+}
+
+/**
+ * 取得指定班級的課程單元。1.3.0 起課程依班級各自獨立，舊資料則回退到單一 lesson。
+ */
+function lessonFor_(payload, classId) {
+  const lessons = payload.lessons || {};
+  return lessons[classId] || payload.lesson || { topic: '', session: '', task: '', startedAt: '' };
 }
 
 /**

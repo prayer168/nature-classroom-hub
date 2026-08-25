@@ -39,7 +39,7 @@ function withQuery(url, params) {
  * 統一的 Apps Script 呼叫入口。
  * 負責逾時中斷、把 Google 登入頁／權限錯誤頁轉成看得懂的訊息，並統一回傳 JSON。
  */
-async function callAppsScript(url, { method = "GET", body = null, timeoutMs = DEFAULT_TIMEOUT, label = "連線" } = {}) {
+async function callAppsScript(url, { method = "GET", body = null, timeoutMs = DEFAULT_TIMEOUT, label = "連線", allowFailure = false } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response;
@@ -89,8 +89,12 @@ async function callAppsScript(url, { method = "GET", body = null, timeoutMs = DE
   } catch (error) {
     throw new Error(`${label}回應格式無法解析：${trimmed.slice(0, 120)}`);
   }
+  // 診斷與自我測試在「有項目未通過」時會回傳 ok:false 但附上完整結果，
+  // 那是正常的回報而不是連線失敗，必須原樣交給呼叫端呈現。
+  if (allowFailure && result && (Array.isArray(result.checks) || Array.isArray(result.steps))) return result;
   if (!result || result.ok !== true) {
-    throw new Error((result && result.error) || `${label}失敗，Apps Script 未回傳成功狀態。`);
+    if (result && result.error) throw new Error(result.error);
+    throw new Error(`${label}失敗，Apps Script 未回傳成功狀態。原始回應：${trimmed.slice(0, 200)}`);
   }
   return result;
 }
@@ -103,7 +107,7 @@ export async function pingGoogle(url = store.get().settings.appsScriptUrl) {
 
 /** 唯讀診斷：檢查分頁欄位、Drive 資料夾與最新備份，不寫入任何資料。 */
 export async function diagnoseGoogle(url = store.get().settings.appsScriptUrl) {
-  return callAppsScript(withQuery(requireUrl(url), { action: "diagnose" }), { label: "連線診斷", timeoutMs: SYNC_TIMEOUT });
+  return callAppsScript(withQuery(requireUrl(url), { action: "diagnose" }), { label: "連線診斷", timeoutMs: SYNC_TIMEOUT, allowFailure: true });
 }
 
 /** 寫入自我測試：建立暫存分頁、Drive 檔案與 Google 文件後刪除，不影響班級資料。 */
@@ -112,7 +116,8 @@ export async function selfTestGoogle({ keepArtifacts = false, url } = {}) {
     method: "POST",
     body: JSON.stringify({ action: "selfTest", options: { keepArtifacts } }),
     timeoutMs: SYNC_TIMEOUT,
-    label: "寫入測試"
+    label: "寫入測試",
+    allowFailure: true
   });
 }
 

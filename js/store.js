@@ -112,6 +112,7 @@ function normalizeState(nextState) {
   nextState.rewards.menu = normalizeRewardMenu(nextState.rewards.menu);
   nextState.scores ||= {};
   nextState.attendance ||= {};
+  nextState.attendanceLog ||= [];
   nextState.observations ||= [];
   return nextState;
 }
@@ -165,6 +166,7 @@ export const createDemoState = () => {
     attendance: {
       [todayKey()]: Object.fromEntries(students.map(student => [student.id, student.seat === 15 ? "late" : student.seat === 17 ? "absent" : "present"]))
     },
+    attendanceLog: [],
     observations: [],
     rewards: { ledger: buildLedger(students), menu: defaultRewardMenu.map(item => ({ ...item })) },
     assessments: initialAssessments,
@@ -268,6 +270,51 @@ export function getTodayAttendance(current = state) {
     if (!current.attendance[key][student.id]) current.attendance[key][student.id] = "present";
   });
   return current.attendance[key];
+}
+
+/** 目前班級在指定日期有紀錄的出席狀態；不會像 getTodayAttendance 那樣補上預設值。 */
+export function attendanceOn(date, current = state) {
+  const day = current.attendance[date] || {};
+  return Object.fromEntries(activeStudents(current)
+    .filter(student => day[student.id])
+    .map(student => [student.id, day[student.id]]));
+}
+
+/** 目前班級在指定月份（YYYY-MM）有出席紀錄的日期，由舊到新。 */
+export function attendanceDatesInMonth(month, current = state) {
+  const ids = new Set(activeStudents(current).map(student => student.id));
+  return Object.keys(current.attendance)
+    .filter(date => date.startsWith(`${month}-`))
+    .filter(date => Object.keys(current.attendance[date] || {}).some(id => ids.has(id)))
+    .sort();
+}
+
+/**
+ * 設定出席狀態，回傳實際變更筆數。
+ * 只有「補改過去日期」才會留下稽核紀錄——當天的即時點名屬於正常作業，
+ * 每次切換都記錄會把紀錄淹掉，也不是使用者想追的東西。
+ */
+export function setAttendance(draft, date, studentId, status) {
+  draft.attendance[date] ||= {};
+  const previous = draft.attendance[date][studentId] || "";
+  if (previous === status) return 0;
+  draft.attendance[date][studentId] = status;
+  if (date === todayKey()) return 1;
+  draft.attendanceLog ||= [];
+  draft.attendanceLog.unshift({
+    id: uniqueId("att"),
+    date,
+    studentId,
+    from: previous,
+    to: status,
+    at: nowIso()
+  });
+  return 1;
+}
+
+/** 指定日期是否被事後調整過。 */
+export function attendanceAdjustedOn(date, current = state) {
+  return (current.attendanceLog || []).some(entry => entry.date === date);
 }
 
 export function studentPoints(studentId, current = state) {

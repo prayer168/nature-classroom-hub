@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#176b52"><meta name="description" content="自然科歷史出席查詢、補改與月統計。"><meta property="og:type" content="website"><meta property="og:title" content="出席紀錄｜自然課堂中控站"><meta property="og:image" content="https://prayer168.github.io/nature-classroom-hub/og-cover.jpg"><meta property="og:locale" content="zh_TW"><meta name="twitter:card" content="summary_large_image"><title>出席紀錄｜自然課堂中控站</title><link rel="stylesheet" href="css/style.css"></head>
+<body data-page="attendance"><a class="skip-link" href="#main">跳到主要內容</a><div id="app-shell"></div>
+<main id="main" class="page" tabindex="-1">
+  <header class="page-header"><div><p class="eyebrow">ATTENDANCE</p><h1>出席紀錄</h1><p>查詢與補改歷史出席，並掌握當月出席趨勢與需要關注的學生。</p></div><div class="page-actions"><button class="btn btn-light" data-action="export-attendance">匯出當月 CSV</button><button class="btn btn-light" data-action="attendance-log">修改紀錄</button></div></header>
+
+  <section class="month-bar card compact">
+    <button class="btn btn-light" data-action="prev-month" aria-label="上一個月">←</button>
+    <div class="month-label"><strong id="month-title">—</strong><small id="month-subtitle">—</small></div>
+    <button class="btn btn-light" data-action="next-month" aria-label="下一個月">→</button>
+    <button class="btn btn-quiet" data-action="this-month">回到本月</button>
+  </section>
+
+  <section class="stats-grid" id="attendance-stats"></section>
+
+  <section class="attendance-split">
+    <article class="card">
+      <div class="card-head"><div><p class="section-kicker">CALENDAR</p><h2>月曆檢視</h2></div></div>
+      <div class="calendar-weekdays" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+      <div class="calendar-grid" id="calendar-grid" role="grid" aria-label="出席月曆"></div>
+      <p class="calendar-legend"><i class="cal-swatch s-high"></i>出席率高<i class="cal-swatch s-mid"></i>中<i class="cal-swatch s-low"></i>低<i class="cal-swatch s-none"></i>無紀錄<span class="cal-adjusted-mark">•</span>已調整</p>
+    </article>
+
+    <article class="card" id="day-panel">
+      <div class="card-head"><div><p class="section-kicker">DAY DETAIL</p><h2 id="day-title">選擇日期</h2></div><span id="day-rate" class="status-pill status-local">—</span></div>
+      <p id="day-hint" class="muted">點選左側月曆中的任一天，即可查看並補改當天的出席狀態。</p>
+      <div class="button-row" id="day-bulk" hidden><button class="btn btn-light" data-action="day-all-present">全班標記到課</button></div>
+      <div id="day-roster" class="day-roster"></div>
+      <p class="table-help">點擊學生可循環切換「到課 → 遲到 → 缺席」；補改過去日期會記錄時間與前後值，當天的即時點名不列入。</p>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div><p class="section-kicker">DAILY TREND</p><h2>當月逐日出席率</h2></div></div>
+    <div class="trend-chart" id="attendance-trend"></div>
+    <p class="table-help">橫條自 0% 起算，數值為當日到課（含遲到）人數佔全班比例。</p>
+  </section>
+
+  <section class="card" id="watchlist-card">
+    <div class="card-head"><div><p class="section-kicker">WATCHLIST</p><h2>需關注名單</h2></div></div>
+    <div id="attendance-watchlist"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div><p class="section-kicker">BY STUDENT</p><h2>個別學生當月統計</h2></div><label class="inline-field">排序<select id="attendance-sort"><option value="absent">缺席次數由多到少</option><option value="late">遲到次數由多到少</option><option value="rate">出席率由低到高</option><option value="seat">依座號</option></select></label></div>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>座號</th><th>學生編號</th><th>到課</th><th>遲到</th><th>缺席</th><th>出席率</th></tr></thead><tbody id="attendance-by-student"></tbody></table></div>
+  </section>
+</main><div id="toast-region" class="toast-region" aria-live="polite"></div><div id="modal-root"></div><script type="module" src="js/app.js"></script></body></html>

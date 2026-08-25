@@ -15,7 +15,7 @@
  */
 
 const APP_NAME = '自然課堂中控站';
-const SCRIPT_VERSION = '2.2.0';
+const SCRIPT_VERSION = '2.3.0';
 const SCHEMA_VERSION = 2;
 
 const PROP_SHEET_ID = 'NATURE_HUB_SHEET_ID';
@@ -31,6 +31,7 @@ const SHEET_DEFINITIONS = {
   Lessons: ['classId', 'topic', 'session', 'task', 'startedAt'],
   Students: ['id', 'classId', 'number', 'seat', 'tags', 'note', 'active', 'createdAt'],
   Attendance: ['date', 'studentId', 'status'],
+  AttendanceLog: ['id', 'date', 'studentId', 'from', 'to', 'at'],
   Rewards: ['id', 'studentId', 'category', 'value', 'note', 'createdAt'],
   RewardMenu: ['id', 'name', 'cost', 'type', 'note'],
   Assessments: ['id', 'name', 'type', 'maxScore', 'weight', 'date'],
@@ -41,6 +42,12 @@ const SHEET_DEFINITIONS = {
 };
 
 const SELF_TEST_SHEET = '_SelfTest';
+
+/** 自動備份設定：每日一份，最多保留 30 份，超過就把最舊的移到垃圾桶。 */
+const AUTO_BACKUP_TRIGGER = 'dailyBackup';
+const AUTO_BACKUP_HOUR = 22;
+const BACKUP_RETENTION = 30;
+const BACKUP_PREFIX = 'backup-';
 
 /* ------------------------------------------------------------------ 初始化 */
 
@@ -66,6 +73,109 @@ function setupNatureHub() {
 
   Object.keys(SHEET_DEFINITIONS).forEach(name => ensureSheet_(spreadsheet, name, SHEET_DEFINITIONS[name]));
   return { sheetUrl: spreadsheet.getUrl(), folderUrl: folder.getUrl(), scriptVersion: SCRIPT_VERSION };
+}
+
+/* --------------------------------------------------------------- 自動備份 */
+
+/**
+ * 手動執行一次即可安裝每日備份觸發器（重複執行不會裝出第二個）。
+ * 觸發器由 Google 在伺服器端執行，不需要教師開著網頁。
+ */
+function installDailyBackup() {
+  removeDailyBackup();
+  ScriptApp.newTrigger(AUTO_BACKUP_TRIGGER).timeBased().atHour(AUTO_BACKUP_HOUR).everyDays(1).create();
+  return { ok: true, message: `已安裝每日 ${AUTO_BACKUP_HOUR} 點左右的自動備份，最多保留 ${BACKUP_RETENTION} 份。` };
+}
+
+function removeDailyBackup() {
+  ScriptApp.getProjectTriggers()
+    .filter(trigger => trigger.getHandlerFunction() === AUTO_BACKUP_TRIGGER)
+    .forEach(trigger => ScriptApp.deleteTrigger(trigger));
+  return { ok: true };
+}
+
+/**
+ * 觸發器進入點。把 Sheets 目前的內容導回 JSON 存成備份，
+ * 因此備份的是「已同步到雲端的資料」，不是老師瀏覽器裡尚未同步的資料。
+ */
+function dailyBackup() {
+  const resources = ensureSetup_();
+  const payload = readSheetsSnapshot_(resources.spreadsheet);
+  if (!payload.students.length) return { ok: false, error: '雲端尚無學生資料，略過本次自動備份。' };
+  const name = `${BACKUP_PREFIX}${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd-HHmmss')}-auto.json`;
+  const file = resources.folder.createFile(Utilities.newBlob(JSON.stringify(payload, null, 2), 'application/json', name));
+  PropertiesService.getScriptProperties().setProperty(PROP_LATEST_BACKUP_ID, file.getId());
+  const removed = pruneBackups_(resources.folder);
+  return { ok: true, name, removed };
+}
+
+/** 只保留最新的 BACKUP_RETENTION 份備份，其餘移到垃圾桶。 */
+function pruneBackups_(folder) {
+  const backups = [];
+  const files = folder.getFiles();
+  while (files.hasNext()) {
+    const file = files.next();
+    if (file.getName().indexOf(BACKUP_PREFIX) === 0) backups.push({ file, at: file.getDateCreated().getTime() });
+  }
+  backups.sort((a, b) => b.at - a.at);
+  const stale = backups.slice(BACKUP_RETENTION);
+  stale.forEach(item => item.file.setTrashed(true));
+  return stale.length;
+}
+
+/** 從 Sheets 分頁還原成前端使用的資料結構。 */
+function readSheetsSnapshot_(spreadsheet) {
+  const read = name => {
+    const sheet = spreadsheet.getSheetByName(name);
+    if (!sheet || sheet.getLastRow() < 2) return [];
+    const keys = SHEET_DEFINITIONS[name];
+    return sheet.getRange(2, 1, sheet.getLastRow() - 1, keys.length).getValues().map(row => {
+      const item = {};
+      keys.forEach((key, index) => { item[key] = row[index]; });
+      return item;
+    });
+  };
+
+  const attendance = {};
+  read('Attendance').forEach(row => {
+    const date = String(row.date);
+    if (!date) return;
+    attendance[date] = attendance[date] || {};
+    attendance[date][row.studentId] = row.status;
+  });
+
+  const scores = {};
+  read('Scores').forEach(row => {
+    if (!row.studentId) return;
+    scores[row.studentId] = scores[row.studentId] || {};
+    scores[row.studentId][row.assessmentId] = row.score === '' ? null : row.score;
+  });
+
+  const lessons = {};
+  read('Lessons').forEach(row => {
+    if (!row.classId) return;
+    lessons[row.classId] = { topic: row.topic, session: row.session, task: row.task, startedAt: row.startedAt || null };
+  });
+
+  const metadata = {};
+  read('Metadata').forEach(row => { metadata[row.key] = row.value; });
+
+  return {
+    version: SCHEMA_VERSION,
+    classes: read('Classes'),
+    lessons,
+    activeClassId: (read('Classes')[0] || {}).id || '',
+    students: read('Students').map(student => ({ ...student, tags: String(student.tags || '').split(',').map(tag => tag.trim()).filter(String) })),
+    attendance,
+    attendanceLog: read('AttendanceLog'),
+    observations: read('Observations'),
+    rewards: { ledger: read('Rewards'), menu: read('RewardMenu') },
+    assessments: read('Assessments'),
+    scores,
+    resources: read('Resources').map(item => ({ ...item, tags: String(item.tags || '').split(',').map(tag => tag.trim()).filter(String) })),
+    updatedAt: metadata.updatedAt || new Date().toISOString(),
+    backupSource: 'auto'
+  };
 }
 
 /* ------------------------------------------------------------- HTTP 進入點 */
@@ -167,6 +277,16 @@ function diagnose_() {
     ok: true,
     detail: `${folder.getName()}（${fileCount}${fileCount >= 500 ? '+' : ''} 個檔案）`,
     url: folder.getUrl()
+  });
+
+  const triggers = ScriptApp.getProjectTriggers().filter(trigger => trigger.getHandlerFunction() === AUTO_BACKUP_TRIGGER);
+  checks.push({
+    key: 'autoBackup',
+    label: '每日自動備份觸發器',
+    ok: triggers.length > 0,
+    detail: triggers.length
+      ? `已安裝（每日約 ${AUTO_BACKUP_HOUR} 點，保留最近 ${BACKUP_RETENTION} 份）`
+      : '尚未安裝。請在 Apps Script 手動執行一次 installDailyBackup()。'
   });
 
   const backupId = PropertiesService.getScriptProperties().getProperty(PROP_LATEST_BACKUP_ID);
@@ -288,6 +408,7 @@ function syncPayload_(payload) {
     });
   });
   writeObjects_(spreadsheet, 'Attendance', attendanceRows);
+  writeObjects_(spreadsheet, 'AttendanceLog', safePayload.attendanceLog || []);
 
   writeObjects_(spreadsheet, 'Rewards', (safePayload.rewards && safePayload.rewards.ledger) || []);
   writeObjects_(spreadsheet, 'RewardMenu', (safePayload.rewards && safePayload.rewards.menu) || []);
@@ -316,10 +437,12 @@ function syncPayload_(payload) {
   const backupBlob = Utilities.newBlob(JSON.stringify(safePayload, null, 2), 'application/json', backupName);
   const backupFile = resources.folder.createFile(backupBlob);
   PropertiesService.getScriptProperties().setProperty(PROP_LATEST_BACKUP_ID, backupFile.getId());
+  const prunedBackups = pruneBackups_(resources.folder);
 
   return {
     ok: true,
     scriptVersion: SCRIPT_VERSION,
+    prunedBackups,
     sheetUrl: spreadsheet.getUrl(),
     folderUrl: resources.folder.getUrl(),
     backupName,

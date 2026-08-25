@@ -1,5 +1,5 @@
 import { renderChrome } from "./chrome.js";
-import { store, activeClass, activeStudents, activeLesson, activeGrade, visibleResources, resourceScopes, RESOURCE_SCOPE_ALL, studentNumberFor, getTodayAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, uniqueId, dateKey } from "./store.js";
+import { store, activeClass, activeStudents, activeLesson, activeGrade, visibleResources, resourceScopes, RESOURCE_SCOPE_ALL, studentNumberFor, getTodayAttendance, attendanceDatesInMonth, attendanceAdjustedOn, setAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, uniqueId, dateKey } from "./store.js";
 import { saveFile, getFile, deleteFile } from "./resource-db.js";
 import QRCode from "qrcode";
 import { pingGoogle, syncToGoogle, fetchGoogleBackup, uploadFileToGoogle, createGoogleDocReport, createStudentGoogleDocReport, diagnoseGoogle, selfTestGoogle, isValidAppsScriptUrl, compareScriptVersion, EXPECTED_SCRIPT_VERSION } from "./google-bridge.js";
@@ -146,7 +146,7 @@ function initDashboard() {
   $$(".student-chip").forEach(button => button.addEventListener("click", () => {
     const order = ["present", "late", "absent"];
     const next = order[(order.indexOf(button.dataset.status) + 1) % order.length];
-    store.update(draft => { getTodayAttendance(draft)[button.dataset.studentId] = next; });
+    store.update(draft => { getTodayAttendance(draft); setAttendance(draft, dateKey(), button.dataset.studentId, next); });
     initDashboard();
     toast(`已更新為「${statusLabel[next]}」。`);
   }));
@@ -671,6 +671,242 @@ async function uploadResourceToDrive(id) { try { const record = await getFile(id
 async function removeResource(id) { const item = store.get().resources.find(resource => resource.id === id); if (store.get().settings.confirmDelete && !confirm(`確定刪除「${item?.name}」？`)) return; if (item?.type === "file") await deleteFile(id); store.update(draft => { draft.resources = draft.resources.filter(resource => resource.id !== id); }); initResources(); toast("資料已刪除。"); }
 function showLinkModal() { openModal({ title: "新增教學連結", body: `<form><div class="form-grid"><label class="field full-field">名稱<input name="name" required></label><label class="field full-field">網址<input name="url" type="url" placeholder="https://" required></label><label class="field">分類<select name="category"><option>連結</option><option>教材</option><option>評量</option></select></label><label class="field">適用範圍<select name="grade">${scopeOptions(activeGrade(store.get()))}</select></label><label class="field">標籤<input name="tags" placeholder="模擬, 酸鹼"></label></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">新增</button></div></form>`, onReady(modal, close) { modal.querySelector("[data-close]").onclick = close; modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget); store.update(draft => draft.resources.unshift({ id: uniqueId("link"), name: String(data.get("name")), url: String(data.get("url")), category: String(data.get("category")), grade: String(data.get("grade")), type: "link", size: 0, createdAt: new Date().toISOString(), tags: String(data.get("tags") || "").split(/[,，]/).map(item => item.trim()).filter(Boolean) })); close(); initResources(); toast("教學連結已新增。"); }; }}); }
 
+/* ---------------------------------------------------------------- 出席紀錄 */
+
+const ATTENDANCE_ORDER = ["present", "late", "absent"];
+const WATCH_ABSENCE_THRESHOLD = 3;
+const WATCH_STREAK_THRESHOLD = 2;
+
+let attendanceMonth = dateKey().slice(0, 7);
+let attendanceSelectedDate = "";
+
+function monthLabel(month) {
+  const [year, mon] = month.split("-").map(Number);
+  return `${year} 年 ${mon} 月`;
+}
+
+function shiftMonth(month, delta) {
+  const [year, mon] = month.split("-").map(Number);
+  const date = new Date(year, mon - 1 + delta, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function daysInMonth(month) {
+  const [year, mon] = month.split("-").map(Number);
+  return new Date(year, mon, 0).getDate();
+}
+
+/** 月曆第一格要空幾格（週一為每週第一天）。 */
+function leadingBlanks(month) {
+  const [year, mon] = month.split("-").map(Number);
+  return (new Date(year, mon - 1, 1).getDay() + 6) % 7;
+}
+
+function dayStats(date, state) {
+  const students = activeStudents(state);
+  const day = state.attendance[date] || {};
+  const counts = { present: 0, late: 0, absent: 0, recorded: 0 };
+  students.forEach(student => {
+    const status = day[student.id];
+    if (!status) return;
+    counts.recorded += 1;
+    if (counts[status] !== undefined) counts[status] += 1;
+  });
+  const rate = counts.recorded ? (counts.present + counts.late) / counts.recorded * 100 : null;
+  return { ...counts, total: students.length, rate };
+}
+
+function initAttendance() {
+  const render = () => {
+    const state = store.get();
+    const students = activeStudents(state);
+    const dates = attendanceDatesInMonth(attendanceMonth, state);
+    if (attendanceSelectedDate && !attendanceSelectedDate.startsWith(`${attendanceMonth}-`)) attendanceSelectedDate = "";
+    if (!attendanceSelectedDate) attendanceSelectedDate = dates.includes(dateKey()) ? dateKey() : dates[dates.length - 1] || "";
+
+    $("#month-title").textContent = monthLabel(attendanceMonth);
+    $("#month-subtitle").textContent = `${activeClass(state).name}｜${dates.length} 個上課日有紀錄`;
+
+    renderAttendanceStats(state, dates);
+    renderCalendar(state, dates);
+    renderDayPanel(state);
+    renderAttendanceTrend(state, dates);
+    renderWatchlist(state, dates, students);
+    renderAttendanceByStudent(state, dates, students);
+  };
+
+  $('[data-action="prev-month"]').onclick = () => { attendanceMonth = shiftMonth(attendanceMonth, -1); render(); };
+  $('[data-action="next-month"]').onclick = () => { attendanceMonth = shiftMonth(attendanceMonth, 1); render(); };
+  $('[data-action="this-month"]').onclick = () => { attendanceMonth = dateKey().slice(0, 7); attendanceSelectedDate = ""; render(); };
+  $('[data-action="export-attendance"]').onclick = () => exportAttendanceCsv();
+  $('[data-action="attendance-log"]').onclick = () => showAttendanceLogModal();
+  $("#attendance-sort").onchange = render;
+  attendanceRender = render;
+  render();
+}
+
+let attendanceRender = () => {};
+
+function renderAttendanceStats(state, dates) {
+  const students = activeStudents(state);
+  const totals = dates.reduce((sum, date) => {
+    const stats = dayStats(date, state);
+    return { present: sum.present + stats.present, late: sum.late + stats.late, absent: sum.absent + stats.absent, recorded: sum.recorded + stats.recorded };
+  }, { present: 0, late: 0, absent: 0, recorded: 0 });
+  const rate = totals.recorded ? (totals.present + totals.late) / totals.recorded * 100 : 0;
+  $("#attendance-stats").innerHTML = [
+    statCard("班級月出席率", totals.recorded ? `${rate.toFixed(1)}%` : "—", `${students.length} 位學生｜含遲到`, "％"),
+    statCard("有紀錄的上課日", dates.length, "只計算目前班級", "日"),
+    statCard("當月缺席人次", totals.absent, "點下方名單追蹤", "缺"),
+    statCard("當月遲到人次", totals.late, "遲到仍計入出席", "遲")
+  ].join("");
+}
+
+function renderCalendar(state, dates) {
+  const recorded = new Set(dates);
+  const total = daysInMonth(attendanceMonth);
+  const blanks = leadingBlanks(attendanceMonth);
+  const cells = Array.from({ length: blanks }, () => '<span class="calendar-cell is-blank" aria-hidden="true"></span>');
+  for (let day = 1; day <= total; day += 1) {
+    const date = `${attendanceMonth}-${String(day).padStart(2, "0")}`;
+    if (!recorded.has(date)) {
+      cells.push(`<button class="calendar-cell s-none${date === attendanceSelectedDate ? " is-selected" : ""}" data-date="${date}"><span class="cal-day">${day}</span><span class="cal-rate">—</span></button>`);
+      continue;
+    }
+    const stats = dayStats(date, state);
+    const level = stats.rate >= 95 ? "s-high" : stats.rate >= 85 ? "s-mid" : "s-low";
+    const adjusted = attendanceAdjustedOn(date, state);
+    cells.push(`<button class="calendar-cell ${level}${date === attendanceSelectedDate ? " is-selected" : ""}" data-date="${date}" aria-label="${date}，出席率 ${stats.rate.toFixed(0)}%"><span class="cal-day">${day}${adjusted ? '<i class="cal-adjusted-mark" title="已調整">•</i>' : ""}</span><span class="cal-rate">${stats.rate.toFixed(0)}%</span></button>`);
+  }
+  $("#calendar-grid").innerHTML = cells.join("");
+  $$("#calendar-grid [data-date]").forEach(button => button.onclick = () => { attendanceSelectedDate = button.dataset.date; attendanceRender(); });
+}
+
+function renderDayPanel(state) {
+  const date = attendanceSelectedDate;
+  const roster = $("#day-roster");
+  if (!date) {
+    $("#day-title").textContent = "選擇日期";
+    $("#day-rate").textContent = "—";
+    $("#day-rate").className = "status-pill status-local";
+    $("#day-hint").hidden = false;
+    $("#day-bulk").hidden = true;
+    roster.innerHTML = "";
+    return;
+  }
+  const stats = dayStats(date, state);
+  const adjusted = attendanceAdjustedOn(date, state);
+  $("#day-title").textContent = `${date}${adjusted ? "（已調整）" : ""}`;
+  $("#day-rate").textContent = stats.recorded ? `出席率 ${stats.rate.toFixed(0)}%` : "尚無紀錄";
+  $("#day-rate").className = `status-pill ${stats.recorded && stats.rate >= 95 ? "status-connected" : "status-local"}`;
+  $("#day-hint").hidden = true;
+  $("#day-bulk").hidden = false;
+  const day = state.attendance[date] || {};
+  roster.innerHTML = activeStudents(state).map(student => {
+    const status = day[student.id] || "";
+    return `<button class="student-chip" data-attendance-student="${student.id}" data-status="${status || "none"}" aria-label="學生 ${esc(student.number)}，${statusLabel[status] || "無紀錄"}"><span class="seat">${student.seat} 號</span><strong>${esc(student.number)}</strong><small>${statusLabel[status] || "無紀錄"}</small></button>`;
+  }).join("");
+  $$("[data-attendance-student]").forEach(button => button.onclick = () => cycleAttendance(date, button.dataset.attendanceStudent));
+  $('[data-action="day-all-present"]').onclick = () => {
+    let changed = 0;
+    store.update(draft => activeStudents(draft).forEach(student => { changed += setAttendance(draft, date, student.id, "present"); }));
+    attendanceRender();
+    toast(changed ? `${date} 已全班標記到課（${changed} 筆變更）。` : "沒有需要變更的紀錄。");
+  };
+}
+
+function cycleAttendance(date, studentId) {
+  const current = store.get().attendance[date]?.[studentId] || "";
+  const next = ATTENDANCE_ORDER[(ATTENDANCE_ORDER.indexOf(current) + 1) % ATTENDANCE_ORDER.length];
+  store.update(draft => { setAttendance(draft, date, studentId, next); });
+  attendanceRender();
+  toast(`${date} 已更新為「${statusLabel[next]}」。`);
+}
+
+function renderAttendanceTrend(state, dates) {
+  if (!dates.length) {
+    $("#attendance-trend").innerHTML = '<p class="muted">當月尚無出席紀錄。</p>';
+    return;
+  }
+  $("#attendance-trend").innerHTML = dates.map(date => {
+    const stats = dayStats(date, state);
+    const value = stats.rate ?? 0;
+    return `<div class="trend-row"><span class="trend-label">${date.slice(5)}</span><span class="trend-track"><i class="trend-fill" style="width:${value.toFixed(1)}%"></i></span><strong class="trend-value">${value.toFixed(0)}%</strong></div>`;
+  }).join("");
+}
+
+function studentMonthStats(studentId, dates, state) {
+  const counts = { present: 0, late: 0, absent: 0, recorded: 0 };
+  let streak = 0;
+  let maxStreak = 0;
+  dates.forEach(date => {
+    const status = state.attendance[date]?.[studentId];
+    if (!status) return;
+    counts.recorded += 1;
+    if (counts[status] !== undefined) counts[status] += 1;
+    if (status === "absent") { streak += 1; maxStreak = Math.max(maxStreak, streak); } else streak = 0;
+  });
+  return { ...counts, maxStreak, rate: counts.recorded ? (counts.present + counts.late) / counts.recorded * 100 : null };
+}
+
+function renderWatchlist(state, dates, students) {
+  const flagged = students.map(student => ({ student, stats: studentMonthStats(student.id, dates, state) }))
+    .filter(item => item.stats.absent >= WATCH_ABSENCE_THRESHOLD || item.stats.maxStreak >= WATCH_STREAK_THRESHOLD)
+    .sort((a, b) => b.stats.absent - a.stats.absent || b.stats.maxStreak - a.stats.maxStreak);
+  if (!flagged.length) {
+    $("#attendance-watchlist").innerHTML = `<p class="muted">當月沒有學生缺席達 ${WATCH_ABSENCE_THRESHOLD} 次或連續缺席 ${WATCH_STREAK_THRESHOLD} 次。</p>`;
+    return;
+  }
+  $("#attendance-watchlist").innerHTML = `<ul class="watchlist">${flagged.map(({ student, stats }) => {
+    const reasons = [];
+    if (stats.absent >= WATCH_ABSENCE_THRESHOLD) reasons.push(`當月缺席 ${stats.absent} 次`);
+    if (stats.maxStreak >= WATCH_STREAK_THRESHOLD) reasons.push(`最長連續缺席 ${stats.maxStreak} 次`);
+    return `<li><span class="task-badge">${stats.absent}</span><div><strong>${student.seat} 號 · ${esc(student.number)}</strong><small>${reasons.join("｜")}</small></div><span class="muted">出席率 ${stats.rate === null ? "—" : `${stats.rate.toFixed(0)}%`}</span></li>`;
+  }).join("")}</ul>`;
+}
+
+function renderAttendanceByStudent(state, dates, students) {
+  const sort = $("#attendance-sort").value;
+  const rows = students.map(student => ({ student, stats: studentMonthStats(student.id, dates, state) }));
+  const sorters = {
+    absent: (a, b) => b.stats.absent - a.stats.absent || a.student.seat - b.student.seat,
+    late: (a, b) => b.stats.late - a.stats.late || a.student.seat - b.student.seat,
+    rate: (a, b) => (a.stats.rate ?? 101) - (b.stats.rate ?? 101) || a.student.seat - b.student.seat,
+    seat: (a, b) => a.student.seat - b.student.seat
+  };
+  rows.sort(sorters[sort] || sorters.seat);
+  $("#attendance-by-student").innerHTML = rows.map(({ student, stats }) => `<tr><td>${student.seat}</td><td>${esc(student.number)}</td><td>${stats.present}</td><td>${stats.late}</td><td>${stats.absent}</td><td>${stats.rate === null ? "—" : `${stats.rate.toFixed(0)}%`}</td></tr>`).join("");
+}
+
+function exportAttendanceCsv() {
+  const state = store.get();
+  const dates = attendanceDatesInMonth(attendanceMonth, state);
+  if (!dates.length) return toast("當月沒有出席紀錄可匯出。", "error");
+  const students = activeStudents(state);
+  const header = ["座號", "學生編號", ...dates, "到課", "遲到", "缺席", "出席率"];
+  const rows = students.map(student => {
+    const stats = studentMonthStats(student.id, dates, state);
+    const cells = dates.map(date => statusLabel[state.attendance[date]?.[student.id]] || "");
+    return [student.seat, student.number, ...cells, stats.present, stats.late, stats.absent, stats.rate === null ? "" : `${stats.rate.toFixed(0)}%`];
+  });
+  const csv = [header, ...rows].map(row => row.map(csvEscape).join(",")).join("\n");
+  download(`${activeClass(state).code}-出席紀錄-${attendanceMonth}.csv`, `﻿${csv}`, "text/csv;charset=utf-8");
+  toast("當月出席 CSV 已下載。");
+}
+
+function showAttendanceLogModal() {
+  const state = store.get();
+  const ids = new Set(activeStudents(state).map(student => student.id));
+  const entries = (state.attendanceLog || []).filter(entry => ids.has(entry.studentId)).slice(0, 100);
+  const numberOf = studentId => state.students.find(student => student.id === studentId)?.number || studentId;
+  const body = entries.length
+    ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>修改時間</th><th>出席日期</th><th>學生</th><th>原本</th><th>改為</th></tr></thead><tbody>${entries.map(entry => `<tr><td>${formatDate(entry.at)}</td><td>${esc(entry.date)}</td><td>${esc(numberOf(entry.studentId))}</td><td>${statusLabel[entry.from] || "無紀錄"}</td><td>${statusLabel[entry.to] || "無紀錄"}</td></tr>`).join("")}</tbody></table></div>`
+    : '<p class="muted">目前班級尚無出席修改紀錄。</p>';
+  openModal({ title: "出席修改紀錄", subtitle: "只顯示目前班級最近 100 筆調整。", className: "large", body: `${body}<div class="modal-actions"><button type="button" class="btn btn-light" data-close>關閉</button></div>`, onReady(modal, close) {
+    modal.querySelector("[data-close]").onclick = close;
+  }});
+}
+
 function initReports() {
   const state = store.get(); const students = activeStudents(state); const studentIds = new Set(students.map(student => student.id)); const attendance = getTodayAttendance(state); const attendanceRate = students.length ? students.filter(student => attendance[student.id] !== "absent").length / students.length * 100 : 0; const classAvg = classAverage(state); const supportCount = state.observations.filter(item => studentIds.has(item.studentId) && item.level === "support").length;
   $("#report-stats").innerHTML = [statCard("今日到課率", `${attendanceRate.toFixed(0)}%`, "遲到列入到課、另行標記", "到"), statCard("班級加權平均", classAvg.toFixed(1), "已有成績學生", "均"), statCard("正向回饋事件", state.rewards.ledger.filter(item => studentIds.has(item.studentId) && item.value > 0).length, "完整流水帳可追溯", "＋"), statCard("需要支持紀錄", supportCount, "僅教師可見", "記")].join("");
@@ -794,6 +1030,7 @@ function initPage() {
   if (page === "dashboard") initDashboard();
   else if (page === "classroom") initClassroom();
   else if (page === "students") initStudents();
+  else if (page === "attendance") initAttendance();
   else if (page === "rewards") initRewards();
   else if (page === "grades") initGrades();
   else if (page === "tools") initTools();

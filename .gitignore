@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .claude/
+backup/
 .env
 .env.*
 !.env.example

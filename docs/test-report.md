@@ -55,6 +55,13 @@
 - [x] 班級與個別學生 Google Docs 報告：建立於指定資料夾，內容只含學生編號
 - [x] 8 MB 以下教材檔案上傳 Drive
 
+### 自動備份與 2.3.0 實機驗證
+
+- [x] 貼上 Code.gs 2.3.0、執行 `setupNatureHub` 建出 `AttendanceLog` 分頁
+- [x] 執行 `installDailyBackup`：觸發條件清單出現 `dailyBackup`（根據時間、每日）
+- [x] 手動執行 `dailyBackup`：Drive 產生 `backup-YYYYMMDD-HHMMSS-auto.json`
+- [x] 重新部署後唯讀診斷 **17/17 全部通過**：版本 `2.3.0（與前端相符）`、12 個定義分頁全過、觸發器回報已安裝
+
 ### 尚未驗證
 
 - [ ] Google Sites 嵌入與學校網域權限

@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#176b52"><meta name="description" content="自然課堂正向獎勵與點數流水帳。"><meta property="og:type" content="website"><meta property="og:title" content="正向獎勵｜自然課堂中控站"><meta property="og:image" content="./assets/images/og-cover.jpg"><meta property="og:locale" content="zh_TW"><meta name="twitter:card" content="summary_large_image"><title>正向獎勵｜自然課堂中控站</title><link rel="stylesheet" href="css/style.css"></head>
+<body data-page="rewards"><a class="skip-link" href="#main">跳到主要內容</a><div id="app-shell"></div>
+<main id="main" class="page" tabindex="-1">
+  <header class="page-header"><div><p class="eyebrow">POSITIVE SUPPORT</p><h1>正向獎勵</h1><p>看見探究、合作與安全操作；每一筆回饋都有清楚脈絡。</p></div><div class="page-actions"><button class="btn btn-light" data-action="redeem">兌換獎勵</button><button class="btn btn-primary" data-action="give-points">給予點數</button></div></header>
+  <div class="notice privacy-notice"><strong>友善班級原則</strong><span>不公開負向排行榜；「需要支持」只作為教師私密觀察，不扣點。</span></div>
+  <section class="stats-grid" id="reward-stats"></section>
+  <div class="content-grid">
+    <section class="card span-2"><div class="card-head"><div><p class="section-kicker">STUDENT BALANCE</p><h2>學生點數</h2></div><label class="search-field small"><span class="sr-only">搜尋</span><input id="reward-search" type="search" placeholder="搜尋學生"></label></div><div class="reward-student-grid" id="reward-student-grid"></div></section>
+    <aside class="card"><div class="card-head"><div><p class="section-kicker">REWARD MENU</p><h2>兌換選單</h2></div><button class="icon-btn" data-action="edit-reward-menu">編輯</button></div><div id="reward-menu" class="reward-menu"></div></aside>
+  </div>
+  <section class="card"><div class="card-head"><div><p class="section-kicker">LEDGER</p><h2>點數流水帳</h2></div><button class="btn btn-quiet" data-action="export-ledger">匯出 CSV</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>時間</th><th>學生</th><th>類型</th><th>異動</th><th>備註</th></tr></thead><tbody id="ledger-body"></tbody></table></div></section>
+</main><div id="toast-region" class="toast-region" aria-live="polite"></div><div id="modal-root"></div><script type="module" src="js/app.js"></script></body></html>

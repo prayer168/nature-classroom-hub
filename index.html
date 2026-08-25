@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#176b52">
+  <meta name="description" content="自然科教師的課堂管理、正向獎勵、成績與教學工具工作台。">
+  <meta property="og:type" content="website"><meta property="og:title" content="自然課堂中控站"><meta property="og:description" content="記錄觀察、鼓勵成長、看見學習。"><meta property="og:image" content="./assets/images/og-cover.jpg"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:locale" content="zh_TW"><meta name="twitter:card" content="summary_large_image">
+  <title>今日課堂｜自然課堂中控站</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body data-page="dashboard">
+  <a class="skip-link" href="#main">跳到主要內容</a>
+  <div id="app-shell"></div>
+  <main id="main" class="page" tabindex="-1">
+    <section class="hero dashboard-hero">
+      <div>
+        <p class="eyebrow" id="today-label"></p>
+        <h1>今天，讓每一次觀察都有跡可循。</h1>
+        <p class="hero-copy">快速完成點名、課堂回饋與形成性評量，課後再把資料安全同步到 Google。</p>
+      </div>
+      <div class="hero-actions">
+        <button class="btn btn-primary" data-action="start-class">開始上課</button>
+        <a class="btn btn-light" href="tools.html">開啟課堂工具</a>
+      </div>
+    </section>
+
+    <section class="stats-grid" id="dashboard-stats" aria-label="今日摘要"></section>
+
+    <div class="dashboard-grid">
+      <section class="card span-2">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">LIVE CLASS</p>
+            <h2>六年甲班 · 今日課堂</h2>
+          </div>
+          <span class="status-pill status-local" id="sync-pill">本機模式</span>
+        </div>
+        <div class="lesson-strip">
+          <div><span>單元</span><strong id="lesson-topic">水溶液的酸鹼性</strong></div>
+          <div><span>課次</span><strong>第 3 節</strong></div>
+          <div><span>今日任務</span><strong>指示劑觀察與紀錄</strong></div>
+          <button class="icon-btn" data-action="edit-lesson" aria-label="編輯課堂資訊">編輯</button>
+        </div>
+        <div class="student-status-grid" id="quick-attendance"></div>
+        <div class="card-footer split">
+          <p class="muted"><span class="legend-dot present"></span>點選學生可切換出席狀態</p>
+          <button class="btn btn-secondary" data-action="all-present">全班到齊</button>
+        </div>
+      </section>
+
+      <aside class="card quick-panel">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">QUICK ACTIONS</p>
+            <h2>課中快記</h2>
+          </div>
+        </div>
+        <button class="quick-action positive" data-quick-point="探究精神" data-value="2"><span>＋2</span><div><strong>探究精神</strong><small>主動提問、設計驗證</small></div></button>
+        <button class="quick-action" data-quick-point="合作學習" data-value="1"><span>＋1</span><div><strong>合作學習</strong><small>傾聽、分工與協助</small></div></button>
+        <button class="quick-action" data-quick-point="安全操作" data-value="1"><span>＋1</span><div><strong>安全操作</strong><small>遵守實驗安全規範</small></div></button>
+        <button class="quick-action support" data-quick-point="需要支持" data-value="0"><span>記</span><div><strong>需要支持</strong><small>私密觀察，不扣點</small></div></button>
+      </aside>
+
+      <section class="card">
+        <div class="card-head"><div><p class="section-kicker">CLASS PULSE</p><h2>本週班級脈動</h2></div><a href="reports.html">完整報表</a></div>
+        <div id="pulse-chart" class="mini-chart" role="img" aria-label="本週出席與參與趨勢"></div>
+        <div id="pulse-summary" class="insight-box"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><div><p class="section-kicker">FOLLOW UP</p><h2>待處理</h2></div></div>
+        <ul class="task-list" id="follow-up-list"></ul>
+      </section>
+    </div>
+  </main>
+  <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  <div id="modal-root"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

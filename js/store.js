@@ -55,6 +55,29 @@ const buildLedger = () => {
   }));
 };
 
+const defaultRewardMenu = [
+  { id: "m01", name: "優先選擇實驗角色", cost: 12, type: "學習特權", icon: "選", note: "下次實驗可優先選擇分工" },
+  { id: "m02", name: "自然小博士貼紙", cost: 18, type: "科學小物", icon: "貼", note: "自然科主題貼紙一張" },
+  { id: "m03", name: "推薦今日科學影片", cost: 25, type: "學習特權", icon: "影", note: "推薦一段 5 分鐘內的科學影片" },
+  { id: "m04", name: "科學文具小禮", cost: 30, type: "科學小物", icon: "筆", note: "科學圖案鉛筆、尺或橡皮擦" },
+  { id: "m05", name: "科學驚喜盲盒", cost: 40, type: "驚喜盲盒", icon: "盲", note: "教師準備的化石、礦石、模型或科學小物隨機一件" },
+  { id: "m06", name: "3D 列印姓名牌", cost: 55, type: "3D 列印", icon: "3D", note: "從指定樣式選擇姓名牌或鑰匙圈" },
+  { id: "m07", name: "迷你科學玩具", cost: 70, type: "科學玩具", icon: "玩", note: "如陀螺、磁力、光學或簡易組裝玩具" },
+  { id: "m08", name: "客製 3D 列印模型", cost: 100, type: "3D 列印", icon: "造", note: "在尺寸與材料範圍內選擇一件科學模型" }
+];
+
+function normalizeState(nextState) {
+  nextState.rewards ||= { ledger: [], menu: [] };
+  nextState.rewards.ledger ||= [];
+  const currentMenu = Array.isArray(nextState.rewards.menu) ? nextState.rewards.menu : [];
+  const currentIds = new Set(currentMenu.map(item => item.id));
+  const defaultsById = new Map(defaultRewardMenu.map(item => [item.id, item]));
+  nextState.rewards.menu = currentMenu
+    .map(item => ({ ...(defaultsById.get(item.id) || {}), ...item }))
+    .concat(defaultRewardMenu.filter(item => !currentIds.has(item.id)).map(item => ({ ...item })));
+  return nextState;
+}
+
 export const createDemoState = () => ({
   version: 1,
   classes: [{ id: "c01", name: "六年甲班", grade: "六年級", subject: "自然科學", schoolYear: "115 學年度" }],
@@ -67,11 +90,7 @@ export const createDemoState = () => ({
   observations: [],
   rewards: {
     ledger: buildLedger(),
-    menu: [
-      { id: "m01", name: "優先選擇實驗角色", cost: 12, note: "下次實驗可優先選擇分工" },
-      { id: "m02", name: "自然小博士貼紙", cost: 18, note: "實體貼紙一張" },
-      { id: "m03", name: "推薦今日科學影片", cost: 25, note: "片長 5 分鐘內" }
-    ]
+    menu: defaultRewardMenu.map(item => ({ ...item }))
   },
   assessments: initialAssessments,
   scores: buildScores(),
@@ -98,7 +117,7 @@ function load() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return createDemoState();
     const parsed = JSON.parse(raw);
-    return parsed?.version === 1 ? parsed : createDemoState();
+    return parsed?.version === 1 ? normalizeState(parsed) : createDemoState();
   } catch (error) {
     console.warn("無法讀取本機資料，已載入示範資料。", error);
     return createDemoState();

@@ -195,11 +195,34 @@ input[type="checkbox"] { width: 1.1rem; height: 1.1rem; accent-color: var(--fore
 .reward-person { display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: .65rem; padding: .7rem; border: 1px solid var(--line); border-radius: 13px; }
 .reward-person .points { color: var(--forest-700); font-family: var(--number-font); font-size: 1.05rem; font-weight: 800; }
 .reward-person small { display: block; color: var(--muted); }
+.reward-guide { margin-bottom: 1.1rem; }
+.reward-guide .card-head p, .reward-catalog-section .card-head p { max-width: 760px; margin: .35rem 0 0; color: var(--muted); font-size: .78rem; }
+.reward-rule-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+.reward-rule { min-height: 150px; display: grid; grid-template-columns: 42px 1fr; align-content: start; gap: .65rem; padding: .85rem; border: 1px solid var(--line); border-radius: 15px; background: linear-gradient(145deg, #fff, var(--forest-50)); }
+.reward-rule-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 13px; color: #fff; background: var(--forest-700); font-weight: 800; }
+.reward-rule strong { display: block; margin-top: .15rem; }
+.reward-rule p { margin: .35rem 0 0; color: var(--muted); font-size: .72rem; line-height: 1.6; }
+.reward-rule .btn { grid-column: 1 / -1; width: 100%; margin-top: auto; }
+.reward-levels { display: grid; gap: .65rem; }
+.reward-level { display: grid; grid-template-columns: 80px 1fr; gap: .2rem .65rem; padding: .75rem; border-radius: 12px; background: var(--forest-50); }
+.reward-level strong { grid-row: span 2; align-self: center; color: var(--forest-800); font-family: var(--number-font); font-size: .78rem; }
+.reward-level span { font-weight: 800; font-size: .8rem; }
+.reward-level small { color: var(--muted); font-size: .68rem; line-height: 1.45; }
 .reward-menu { display: grid; gap: .65rem; }
 .reward-item { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: .75rem; border-radius: 12px; background: var(--forest-50); }
 .reward-item strong { display: block; font-size: .86rem; }
 .reward-item small { color: var(--muted); }
 .reward-cost { white-space: nowrap; color: var(--forest-700); font-weight: 800; }
+.reward-catalog-section { margin-bottom: 1.1rem; }
+.reward-catalog { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+.reward-catalog-item { min-height: 145px; display: grid; grid-template-columns: 54px 1fr auto; align-items: center; gap: .8rem; padding: 1rem; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
+.reward-prize-icon { width: 54px; height: 54px; display: grid; place-items: center; border-radius: 16px; color: var(--forest-950); background: var(--lime-soft); font-family: var(--number-font); font-weight: 900; }
+.reward-type { display: inline-block; margin-bottom: .3rem; color: var(--forest-700); font-size: .64rem; font-weight: 800; letter-spacing: .08em; }
+.reward-prize-copy h3 { margin: 0; font-size: .88rem; }
+.reward-prize-copy p { margin: .35rem 0 0; color: var(--muted); font-size: .7rem; line-height: 1.5; }
+.reward-prize-action { display: grid; justify-items: end; gap: .55rem; }
+.reward-prize-action strong { color: var(--forest-800); font-family: var(--number-font); font-size: 1rem; }
+.reward-prize-action .btn { white-space: nowrap; }
 .delta { font-family: var(--number-font); font-weight: 800; }
 .delta.positive { color: var(--forest-700); }
 .delta.negative { color: #9b4436; }
@@ -396,6 +419,8 @@ input[type="checkbox"] { width: 1.1rem; height: 1.1rem; accent-color: var(--fore
   .tool-grid { grid-template-columns: repeat(2, 1fr); }
   .resource-grid { grid-template-columns: repeat(3, 1fr); }
   .reward-student-grid { grid-template-columns: repeat(2, 1fr); }
+  .reward-rule-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reward-catalog { grid-template-columns: 1fr; }
   .classroom-summary { grid-template-columns: repeat(2, 1fr); }
 }
 
@@ -425,7 +450,10 @@ input[type="checkbox"] { width: 1.1rem; height: 1.1rem; accent-color: var(--fore
   .dashboard-grid .span-2, .content-grid .span-2, .report-grid .span-2 { grid-column: span 1; }
   .stat-card { min-height: 105px; }
   .student-status-grid { grid-template-columns: repeat(2, 1fr); }
-  .reward-student-grid, .resource-grid, .insight-grid { grid-template-columns: 1fr; }
+  .reward-student-grid, .resource-grid, .insight-grid, .reward-rule-grid { grid-template-columns: 1fr; }
+  .reward-catalog-item { grid-template-columns: 48px 1fr; }
+  .reward-prize-icon { width: 48px; height: 48px; }
+  .reward-prize-action { grid-column: 1 / -1; grid-template-columns: 1fr auto; align-items: center; justify-items: start; width: 100%; }
   .form-grid { grid-template-columns: 1fr; }
   .form-grid .full-field { grid-column: auto; }
   .student-picker { grid-template-columns: repeat(2,1fr); }

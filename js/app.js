@@ -346,18 +346,38 @@ function importStudents() {
   input.click();
 }
 
+const rewardRuleDefinitions = [
+  { icon: "發", category: "發表次數", value: 1, title: "主動發表", detail: "舉手分享觀察、答案或想法，每次 +1；有證據的完整說明可由教師調整為 +2。" },
+  { icon: "序", category: "上課秩序", value: 1, title: "上課秩序", detail: "準時就位、專心傾聽、依指示操作，一節課表現穩定 +1。" },
+  { icon: "友", category: "友愛同學", value: 2, title: "友愛同學", detail: "主動協助、耐心傾聽或鼓勵同學完成任務，每次 +2。" },
+  { icon: "掃", category: "認真打掃", value: 2, title: "認真打掃", detail: "完成責任區、主動整理公共區域或協助垃圾分類，每次 +2。" },
+  { icon: "記", category: "優良筆記", value: 3, title: "優良筆記", detail: "紀錄完整、圖表清楚，並能寫出觀察證據或結論，每份 +3。" },
+  { icon: "安", category: "安全操作", value: 2, title: "實驗安全", detail: "正確使用器材、主動提醒安全並完成復原整理，每次 +2。" }
+];
+
+const rewardLevelDefinitions = [
+  { range: "10–19 點", title: "基礎小獎", detail: "貼紙、科學卡或課堂小特權" },
+  { range: "20–39 點", title: "學習選擇", detail: "科學文具、影片推薦或角色優先" },
+  { range: "40–69 點", title: "科學驚喜", detail: "科學盲盒或 3D 列印小物" },
+  { range: "70 點以上", title: "進階科學獎", detail: "科學玩具或客製 3D 列印作品" }
+];
+
 function initRewards() {
   const render = () => {
     const state = store.get(); const query = $("#reward-search")?.value.trim().toLowerCase() || "";
     const total = state.rewards.ledger.filter(entry => entry.value > 0).reduce((sum, entry) => sum + entry.value, 0);
     const redeemed = Math.abs(state.rewards.ledger.filter(entry => entry.value < 0).reduce((sum, entry) => sum + entry.value, 0));
-    $("#reward-stats").innerHTML = [statCard("本週正向點數", total, "包含個人與小組回饋", "＋"), statCard("獲得回饋學生", new Set(state.rewards.ledger.filter(entry => entry.value > 0).map(entry => entry.studentId)).size, "持續讓每位學生被看見", "人"), statCard("已兌換點數", redeemed, "兌換後保留完整流水帳", "換"), statCard("最常見回饋", topCategory(state), "依本期點數事件統計", "類")].join("");
+    $("#reward-stats").innerHTML = [statCard("本期正向點數", total, "包含個人與小組回饋", "＋"), statCard("獲得回饋學生", new Set(state.rewards.ledger.filter(entry => entry.value > 0).map(entry => entry.studentId)).size, "持續讓每位學生被看見", "人"), statCard("已兌換點數", redeemed, "兌換後保留完整流水帳", "換"), statCard("最常見回饋", topCategory(state), "依本期點數事件統計", "類")].join("");
+    $("#reward-rule-grid").innerHTML = rewardRuleDefinitions.map(rule => `<article class="reward-rule"><span class="reward-rule-icon">${esc(rule.icon)}</span><div><strong>${esc(rule.title)}</strong><p>${esc(rule.detail)}</p></div><button class="btn btn-light" data-rule-category="${esc(rule.category)}" data-rule-value="${rule.value}">＋${rule.value} 加點</button></article>`).join("");
+    $("#reward-levels").innerHTML = rewardLevelDefinitions.map(level => `<div class="reward-level"><strong>${esc(level.range)}</strong><span>${esc(level.title)}</span><small>${esc(level.detail)}</small></div>`).join("");
     $("#reward-student-grid").innerHTML = state.students.filter(student => student.name.toLowerCase().includes(query)).map(student => `<article class="reward-person"><span class="avatar">${esc(student.name.slice(-1))}</span><div><strong>${student.seat}. ${esc(student.name)}</strong><small>本期累積</small></div><span class="points">${studentPoints(student.id, state)}</span></article>`).join("");
-    $("#reward-menu").innerHTML = state.rewards.menu.map(item => `<div class="reward-item"><div><strong>${esc(item.name)}</strong><small>${esc(item.note)}</small></div><span class="reward-cost">${item.cost} 點</span></div>`).join("");
+    $("#reward-menu").innerHTML = [...state.rewards.menu].sort((a, b) => a.cost - b.cost).map(item => `<article class="reward-catalog-item"><div class="reward-prize-icon" aria-hidden="true">${esc(item.icon || "獎")}</div><div class="reward-prize-copy"><span class="reward-type">${esc(item.type || "班級獎品")}</span><h3>${esc(item.name)}</h3><p>${esc(item.note)}</p></div><div class="reward-prize-action"><strong>${item.cost} 點</strong><button class="btn btn-secondary" data-redeem-reward="${item.id}">選擇兌換</button></div></article>`).join("");
     $("#ledger-body").innerHTML = state.rewards.ledger.slice(0, 80).map(entry => { const student = state.students.find(item => item.id === entry.studentId); return `<tr><td>${formatDate(entry.createdAt)}</td><td>${esc(student?.name || "已刪除")}</td><td>${esc(entry.category)}</td><td><span class="delta ${entry.value >= 0 ? "positive" : "negative"}">${entry.value > 0 ? "+" : ""}${entry.value}</span></td><td>${esc(entry.note || "—")}</td></tr>`; }).join("");
+    $$('[data-rule-category]').forEach(button => button.onclick = () => showPointModal(button.dataset.ruleCategory, Number(button.dataset.ruleValue)));
+    $$('[data-redeem-reward]').forEach(button => button.onclick = () => showRedeemModal(button.dataset.redeemReward));
   };
   $('[data-action="give-points"]').onclick = () => showPointModal();
-  $('[data-action="redeem"]').onclick = showRedeemModal;
+  $('[data-action="redeem"]').onclick = () => showRedeemModal();
   $('[data-action="export-ledger"]').onclick = exportLedger;
   $('[data-action="edit-reward-menu"]').onclick = editRewardMenu;
   $("#reward-search").oninput = render;
@@ -369,16 +389,16 @@ function topCategory(state) {
   return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
 }
 
-function showRedeemModal() {
+function showRedeemModal(defaultRewardId = "") {
   const state = store.get();
-  openModal({ title: "兌換獎勵", subtitle: "兌換會扣除點數並保留流水帳。", body: `<form><div class="form-grid"><label class="field full-field">學生<select name="studentId">${state.students.map(student => `<option value="${student.id}">${student.seat}. ${esc(student.name)}（${studentPoints(student.id, state)} 點）</option>`).join("")}</select></label><label class="field full-field">獎勵<select name="rewardId">${state.rewards.menu.map(item => `<option value="${item.id}">${esc(item.name)}（${item.cost} 點）</option>`).join("")}</select></label></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">確認兌換</button></div></form>`, onReady(modal, close) {
+  openModal({ title: "兌換獎勵", subtitle: "兌換會扣除點數並保留流水帳；獎勵點數不影響學業成績。", body: `<form><div class="form-grid"><label class="field full-field">學生<select name="studentId">${state.students.map(student => `<option value="${student.id}">${student.seat}. ${esc(student.name)}（可用 ${studentPoints(student.id, state)} 點）</option>`).join("")}</select></label><label class="field full-field">獎品<select name="rewardId">${[...state.rewards.menu].sort((a,b) => a.cost-b.cost).map(item => `<option value="${item.id}" ${item.id === defaultRewardId ? "selected" : ""}>${esc(item.name)}（${item.cost} 點）</option>`).join("")}</select></label></div><div class="notice"><strong>兌換提醒</strong><span>教師確認獎品庫存與交付時間後再完成兌換；系統會自動留下扣點紀錄。</span></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">確認兌換</button></div></form>`, onReady(modal, close) {
     modal.querySelector("[data-close]").onclick = close;
-    modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget); const studentId = String(data.get("studentId")); const reward = state.rewards.menu.find(item => item.id === data.get("rewardId")); if (studentPoints(studentId) < reward.cost) return toast("點數不足，無法兌換。", "error"); store.update(draft => draft.rewards.ledger.unshift({ id: uniqueId("redeem"), studentId, category: "獎勵兌換", value: -reward.cost, note: reward.name, createdAt: new Date().toISOString() })); close(); initRewards(); toast(`已兌換「${reward.name}」。`); };
+    modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget); const studentId = String(data.get("studentId")); const reward = state.rewards.menu.find(item => item.id === data.get("rewardId")); if (!reward) return toast("找不到這項獎品。", "error"); const available = studentPoints(studentId, store.get()); if (available < reward.cost) return toast(`點數不足：目前 ${available} 點，還需要 ${reward.cost - available} 點。`, "error"); store.update(draft => draft.rewards.ledger.unshift({ id: uniqueId("redeem"), studentId, category: "獎勵兌換", value: -reward.cost, note: reward.name, createdAt: new Date().toISOString() })); close(); initRewards(); toast(`已兌換「${reward.name}」，扣除 ${reward.cost} 點。`); };
   }});
 }
 
 function editRewardMenu() {
-  openModal({ title: "新增兌換項目", body: `<form><div class="form-grid"><label class="field">名稱<input name="name" required></label><label class="field">所需點數<input name="cost" type="number" min="1" value="10" required></label><label class="field full-field">說明<input name="note"></label></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">新增</button></div></form>`, onReady(modal, close) { modal.querySelector("[data-close]").onclick = close; modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget); store.update(draft => draft.rewards.menu.push({ id: uniqueId("menu"), name: String(data.get("name")), cost: Number(data.get("cost")), note: String(data.get("note") || "") })); close(); initRewards(); toast("兌換項目已新增。"); }; }});
+  openModal({ title: "新增兌換獎品", subtitle: "可依班級預算、器材與學生年齡調整。", body: `<form><div class="form-grid"><label class="field">獎品名稱<input name="name" required placeholder="例如：自製太陽系模型"></label><label class="field">所需點數<input name="cost" type="number" min="1" value="20" required></label><label class="field">獎品類型<select name="type"><option>科學小物</option><option>科學玩具</option><option>3D 列印</option><option>驚喜盲盒</option><option>學習特權</option><option>其他</option></select></label><label class="field">圖示文字<input name="icon" maxlength="2" value="獎"></label><label class="field full-field">獎品說明<input name="note" placeholder="內容、尺寸或兌換限制"></label></div><div class="modal-actions"><button type="button" class="btn btn-light" data-close>取消</button><button class="btn btn-primary">新增獎品</button></div></form>`, onReady(modal, close) { modal.querySelector("[data-close]").onclick = close; modal.querySelector("form").onsubmit = event => { event.preventDefault(); const data = new FormData(event.currentTarget); store.update(draft => draft.rewards.menu.push({ id: uniqueId("menu"), name: String(data.get("name")), cost: Number(data.get("cost")), type: String(data.get("type")), icon: String(data.get("icon") || "獎"), note: String(data.get("note") || "") })); close(); initRewards(); toast("兌換獎品已新增。"); }; }});
 }
 
 function exportLedger() {

@@ -86,6 +86,27 @@ function normalizeRewardMenu(menu = []) {
     .concat(defaultRewardMenu.filter(item => !currentIds.has(item.id)).map(item => ({ ...item })));
 }
 
+/**
+ * 把所有以 student.id 為鍵的資料一起改名。
+ * 學生編號一改，id 也要跟著改，但成績、出席、點數、觀察與各式紀錄
+ * 全都用 id 當外鍵，漏掉任何一處資料就會斷開，因此集中在這裡處理。
+ */
+function remapStudentIds(target, idMap) {
+  if (!idMap.size) return;
+  const swap = id => idMap.get(id) || id;
+  const rekey = source => Object.fromEntries(Object.entries(source || {}).map(([id, value]) => [swap(id), value]));
+
+  target.students = (target.students || []).map(student => (idMap.has(student.id) ? { ...student, id: swap(student.id) } : student));
+  target.scores = rekey(target.scores);
+  target.scoreStatus = rekey(target.scoreStatus);
+  Object.keys(target.attendance || {}).forEach(date => { target.attendance[date] = rekey(target.attendance[date]); });
+  ["observations", "attendanceLog", "transferLog"].forEach(key => {
+    target[key] = (target[key] || []).map(item => (idMap.has(item.studentId) ? { ...item, studentId: swap(item.studentId) } : item));
+  });
+  if (target.rewards?.ledger) target.rewards.ledger = target.rewards.ledger.map(item => (idMap.has(item.studentId) ? { ...item, studentId: swap(item.studentId) } : item));
+  if (target.toolHistory?.recentlyPicked) target.toolHistory.recentlyPicked = target.toolHistory.recentlyPicked.map(swap);
+}
+
 function normalizeState(nextState) {
   nextState.version = 2;
   nextState.classes = classDefinitions.map(item => ({ ...item }));
@@ -121,10 +142,21 @@ function normalizeState(nextState) {
     ...item,
     grade: resourceScopes.includes(item.grade) ? item.grade : RESOURCE_SCOPE_ALL
   }));
+  // 轉制的學生要重新編號（5101 → 6101），id 也跟著改成 stu-6101；
+  // 先把所有以舊 id 為外鍵的資料一起改名，成績與出席才不會斷開。
+  const idMap = new Map();
+  (nextState.students || []).forEach(student => {
+    const migratedClassId = CLASS_MIGRATION[student.classId];
+    if (!migratedClassId) return;
+    const classInfo = classDefinitions.find(item => item.id === migratedClassId);
+    const nextId = `stu-${studentNumberFor(classInfo.code, student.seat)}`;
+    if (student.id !== nextId) idMap.set(student.id, nextId);
+  });
+  remapStudentIds(nextState, idMap);
+
   nextState.students = (nextState.students || []).map(student => {
     const migratedClassId = CLASS_MIGRATION[student.classId];
     const classInfo = classDefinitions.find(item => item.id === (migratedClassId || student.classId)) || classDefinitions[0];
-    // 轉制的學生要重新編號（5101 → 6101）；student.id 維持不變，成績與出席才不會斷開。
     const number = migratedClassId ? studentNumberFor(classInfo.code, student.seat) : (student.number || studentNumberFor(classInfo.code, student.seat));
     return { ...student, id: student.id || `stu-${number}`, number, name: `學生 ${number}`, classId: classInfo.id };
   });
@@ -327,13 +359,31 @@ export function transferStudent(draft, studentId, toClassId, toSeat) {
   if (!student || !target) return null;
   const fromClassId = student.classId;
   const fromNumber = student.number;
-  const number = studentNumberFor(target.code, toSeat);
-  student.classId = target.id;
-  student.seat = Number(toSeat);
-  student.number = number;
+  const moved = setStudentSeat(draft, studentId, toClassId, toSeat);
+  if (!moved) return null;
   draft.transferLog ||= [];
-  draft.transferLog.unshift({ id: uniqueId("mv"), studentId, fromClassId, toClassId, fromNumber, toNumber: number, at: nowIso() });
-  return { fromNumber, toNumber: number };
+  draft.transferLog.unshift({ id: uniqueId("mv"), studentId: moved.studentId, fromClassId, toClassId, fromNumber, toNumber: moved.number, at: nowIso() });
+  return { fromNumber, toNumber: moved.number, studentId: moved.studentId };
+}
+
+/**
+ * 調整學生的班級與座號，並讓編號與 id 一起跟上（id 恆為 stu-<編號>）。
+ * 回傳異動後的 id 與編號。
+ */
+export function setStudentSeat(draft, studentId, classId, seat) {
+  const student = draft.students.find(item => item.id === studentId);
+  const target = classDefinitions.find(item => item.id === classId);
+  if (!student || !target) return null;
+  const number = studentNumberFor(target.code, seat);
+  student.classId = target.id;
+  student.seat = Number(seat);
+  student.number = number;
+
+  // 回收筒裡的學生也占著 id，撞到時加上後綴避免覆蓋別人的成績。
+  let nextId = `stu-${number}`;
+  if (nextId !== studentId && draft.students.some(item => item.id === nextId)) nextId = `${nextId}-${Math.random().toString(36).slice(2, 6)}`;
+  if (nextId !== studentId) remapStudentIds(draft, new Map([[studentId, nextId]]));
+  return { studentId: nextId, number };
 }
 
 export function getTodayAttendance(current = state) {

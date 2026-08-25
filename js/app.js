@@ -1,5 +1,5 @@
 import { renderChrome } from "./chrome.js";
-import { store, activeClass, activeStudents, inactiveStudents, deletedStudents, occupiedSeats, freeSeats, transferStudent, activeLesson, activeGrade, visibleResources, resourceScopes, RESOURCE_SCOPE_ALL, studentNumberFor, getTodayAttendance, attendanceDatesInMonth, attendanceAdjustedOn, setAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, totalWeight, effectiveScore, isAbsentExam, absentExamScore, scoreStatusOf, setScoreStatus, ABSENT_PENALTY, uniqueId, dateKey } from "./store.js";
+import { store, activeClass, activeStudents, inactiveStudents, deletedStudents, occupiedSeats, freeSeats, transferStudent, setStudentSeat, activeLesson, activeGrade, visibleResources, resourceScopes, RESOURCE_SCOPE_ALL, studentNumberFor, getTodayAttendance, attendanceDatesInMonth, attendanceAdjustedOn, setAttendance, studentPoints, studentAverage, classAverage, assessmentAverage, totalWeight, effectiveScore, isAbsentExam, absentExamScore, scoreStatusOf, setScoreStatus, ABSENT_PENALTY, uniqueId, dateKey } from "./store.js";
 import { saveFile, getFile, deleteFile } from "./resource-db.js";
 import QRCode from "qrcode";
 import { pingGoogle, syncToGoogle, fetchGoogleBackup, uploadFileToGoogle, createGoogleDocReport, createStudentGoogleDocReport, diagnoseGoogle, selfTestGoogle, isValidAppsScriptUrl, compareScriptVersion, EXPECTED_SCRIPT_VERSION } from "./google-bridge.js";
@@ -469,8 +469,7 @@ function restoreStudent(studentId) {
     if (!target) return;
     delete target.deletedAt;
     target.active = true;
-    target.seat = seat;
-    target.number = number;
+    setStudentSeat(draft, studentId, target.classId, seat);
   });
   studentsRender();
   toast(moved ? `已還原，因原座號被占用，改為 ${seat} 號（編號 ${number}）。` : `已還原學生 ${number}。`);

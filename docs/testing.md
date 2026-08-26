@@ -1,6 +1,6 @@
 # 自動化測試
 
-共 54 項。以 [Playwright](https://playwright.dev/) 對建置後的正式產物做端對端測試，涵蓋前幾個版本原本靠人工點過一輪才能確認的流程。
+共 71 項。以 [Playwright](https://playwright.dev/) 對建置後的正式產物做端對端測試，涵蓋前幾個版本原本靠人工點過一輪才能確認的流程。
 
 ## 執行
 
@@ -31,6 +31,7 @@ npx playwright install chromium
 | `tests/grades.spec.js` | 缺考推算與補考覆蓋、權重提醒、評量複製與刪除、匯入預覽八種狀態與復原 |
 | `tests/attendance.spec.js` | 月曆與當月統計、補改留稽核、需關注名單、班級隔離 |
 | `tests/resources.spec.js` | 依年級顯示、切換班級、調整單一資源的適用範圍 |
+| `tests/sync-merge.spec.js` | 雲端三方合併的語意：只有一邊改、兩邊改不同筆、真衝突、刪除、鍵順序、出席分片 |
 | `tests/rewards.spec.js` | 獎品庫存顯示與扣減、售罄擋下兌換、待交付清單與交付標記、舊資料相容 |
 | `tests/student-detail.spec.js` | 個人趨勢面板的四個區塊、成績排序與班級平均對照、空資料情境 |
 | `tests/mobile.spec.js` | 十頁在手機寬度下不整頁橫捲、固定頁首不超出畫面、寬表格只在容器內捲動 |

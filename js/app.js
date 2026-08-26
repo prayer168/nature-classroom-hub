@@ -1587,16 +1587,35 @@ async function initAccountCard() {
   card.querySelector('[data-action="cloud-push"]').onclick = () => busy(cloud.forcePush, "上傳");
   card.querySelector('[data-action="cloud-pull"]').onclick = () => busy(cloud.forcePull, "下載");
   cloudResolver = cloud.resolveInitialSync;
+  cloudConflictClearer = cloud.clearConflicts;
   cloud.onCloudState(renderAccountCard);
 }
 
 let cloudResolver = null;
+let cloudConflictClearer = null;
+
+/** 把衝突位置翻成教師看得懂的說法。 */
+function conflictLabel(item) {
+  const names = {
+    students: "學生資料", scores: "成績", scoreStatus: "缺考標記", assessments: "評量設定",
+    rewardsLedger: "點數紀錄", rewardsMenu: "獎品目錄", observations: "觀察紀錄",
+    resources: "教學資源", lessons: "課程單元", attendanceLog: "出席修改紀錄",
+    transferLog: "轉班紀錄", meta: "系統設定"
+  };
+  const section = String(item.section || "");
+  const label = section.startsWith("attendance:") ? `出席（${section.slice(11)}）` : names[section] || section;
+  const state = store.get();
+  const id = String(item.id || "");
+  const studentId = id.split("/")[0];
+  const student = state.students.find(entry => entry.id === studentId || entry.id === id);
+  return student ? `${label}：學生 ${student.number}` : `${label}：${id}`;
+}
 
 function renderAccountCard(cloud) {
   const card = $("#account-card");
   if (!card || !cloud.enabled) return;
   const signedIn = Boolean(cloud.user);
-  $("#account-status").textContent = !cloud.ready ? "檢查登入狀態…" : signedIn ? "已登入" : "未登入";
+  $("#account-status").textContent = !cloud.ready ? "檢查登入狀態…" : cloud.syncing ? "同步中…" : signedIn ? "已登入" : "未登入";
   $("#account-status").className = `status-pill ${signedIn ? "status-connected" : "status-local"}`;
   card.querySelector('[data-action="cloud-sign-in"]').hidden = signedIn;
   ["cloud-sign-out", "cloud-push", "cloud-pull"].forEach(action => { card.querySelector(`[data-action="${action}"]`).hidden = !signedIn; });
@@ -1604,7 +1623,17 @@ function renderAccountCard(cloud) {
   const detail = $("#account-detail");
   detail.hidden = !signedIn;
   if (signedIn) {
-    detail.innerHTML = `<strong>${esc(cloud.user.email || "")}</strong><small>${cloud.lastSyncedAt ? `最後同步：${formatDate(cloud.lastSyncedAt)}` : "尚未同步"}</small>`;
+    detail.innerHTML = `<strong>${esc(cloud.user.email || "")}</strong><small>${cloud.lastSyncedAt ? `最後同步：${formatDate(cloud.lastSyncedAt)}` : "尚未同步"}${cloud.error ? ` · 上次同步失敗：${esc(cloud.error)}` : ""}</small>`;
+  }
+
+  const conflictBox = $("#cloud-conflicts");
+  if (conflictBox) {
+    const conflicts = cloud.conflicts || [];
+    conflictBox.hidden = !conflicts.length;
+    if (conflicts.length) {
+      conflictBox.innerHTML = `<strong>有 ${conflicts.length} 筆資料在兩台裝置同時被修改</strong><span>已保留這台裝置的版本，另一台的修改被覆蓋。若那邊才是正確的，請到該裝置重新輸入一次。</span><ul class="conflict-list">${conflicts.slice(0, 8).map(item => `<li>${esc(conflictLabel(item))}</li>`).join("")}</ul><div class="button-row"><button class="btn btn-light" data-action="dismiss-conflicts">知道了</button></div>`;
+      conflictBox.querySelector('[data-action="dismiss-conflicts"]').onclick = () => { cloudConflictClearer?.(); };
+    }
   }
 
   const resolution = $("#cloud-resolution");

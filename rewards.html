@@ -11,5 +11,6 @@
     <aside class="card"><div class="card-head"><div><p class="section-kicker">POINT LEVELS</p><h2>點數兌換級距</h2></div></div><div id="reward-levels" class="reward-levels"></div></aside>
   </div>
   <section class="card reward-catalog-section"><div class="card-head"><div><p class="section-kicker">REWARD CATALOG</p><h2>獎品兌換目錄</h2><p>點數越高可選擇越進階的科學獎品；實際品項可依班級預算與器材調整。</p></div><button class="btn btn-light" data-action="edit-reward-menu">新增獎品</button></div><div id="reward-menu" class="reward-catalog"></div></section>
+  <section class="card"><div class="card-head"><div><p class="section-kicker">DELIVERY</p><h2>待交付獎品<span id="pending-count" class="pending-count">0</span></h2><p>兌換後的獎品交到學生手上再標記完成，避免扣了點卻忘記發。</p></div></div><div id="pending-deliveries"></div></section>
   <section class="card"><div class="card-head"><div><p class="section-kicker">LEDGER</p><h2>點數流水帳</h2></div><button class="btn btn-quiet" data-action="export-ledger">匯出 CSV</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>時間</th><th>學生</th><th>類型</th><th>異動</th><th>備註</th></tr></thead><tbody id="ledger-body"></tbody></table></div></section>
 </main><div id="toast-region" class="toast-region" aria-live="polite"></div><div id="modal-root"></div><script type="module" src="js/app.js"></script></body></html>

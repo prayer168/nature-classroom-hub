@@ -83,7 +83,9 @@ function normalizeRewardMenu(menu = []) {
   const defaultsById = new Map(defaultRewardMenu.map(item => [item.id, item]));
   return currentMenu
     .map(item => ({ ...(defaultsById.get(item.id) || {}), ...item }))
-    .concat(defaultRewardMenu.filter(item => !currentIds.has(item.id)).map(item => ({ ...item })));
+    .concat(defaultRewardMenu.filter(item => !currentIds.has(item.id)).map(item => ({ ...item })))
+    // 舊資料沒有庫存欄位，一律視為不限量，才不會突然變成「已兌完」。
+    .map(item => ({ ...item, stock: item.stock === null || item.stock === undefined ? null : Math.max(0, Number(item.stock) || 0) }));
 }
 
 /**
@@ -162,6 +164,10 @@ function normalizeState(nextState) {
   });
   nextState.rewards ||= { ledger: [], menu: [] };
   nextState.rewards.ledger ||= [];
+  // 兌換紀錄補上交付狀態；舊紀錄視為已交付，避免歷史資料全部跳成待交付。
+  nextState.rewards.ledger = nextState.rewards.ledger.map(entry => (
+    entry.value < 0 && entry.delivered === undefined ? { ...entry, delivered: true, deliveredAt: entry.createdAt } : entry
+  ));
   nextState.rewards.menu = normalizeRewardMenu(nextState.rewards.menu);
   nextState.scores ||= {};
   nextState.scoreStatus ||= {};
@@ -438,6 +444,24 @@ export function setAttendance(draft, date, studentId, status) {
 /** 指定日期是否被事後調整過。 */
 export function attendanceAdjustedOn(date, current = state) {
   return (current.attendanceLog || []).some(entry => entry.date === date);
+}
+
+/** 獎品剩餘數量；null 代表不限量。 */
+export function prizeStock(prizeId, current = state) {
+  const prize = current.rewards.menu.find(item => item.id === prizeId);
+  return prize ? (prize.stock === null || prize.stock === undefined ? null : Number(prize.stock)) : null;
+}
+
+export function prizeSoldOut(prizeId, current = state) {
+  return prizeStock(prizeId, current) === 0;
+}
+
+/** 已兌換但尚未交付的紀錄，最近的排前面。 */
+export function pendingDeliveries(current = state) {
+  const ids = new Set(activeStudents(current).map(student => student.id));
+  return current.rewards.ledger
+    .filter(entry => entry.value < 0 && entry.delivered === false && ids.has(entry.studentId))
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 }
 
 export function studentPoints(studentId, current = state) {

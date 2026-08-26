@@ -12,7 +12,7 @@
 
 - 今日課堂：到課／遲到／缺席、課堂任務、即時觀察與正向點數。
 - 教室座位圖：依「自然教室一」實際配置呈現 5 張實驗桌與 30 個座位，可直接點名、個人／小組加點與查看學生摘要。
-- 學生與班級：支援 402、403、501、502、503、508 六班切換；全站只使用匿名學生編號，可新增、編輯、線上刪除、搜尋、CSV 匯入與匯出。
+- 學生與班級：支援 402、403、601、602、603、608 六班切換；全站只使用匿名學生編號，可新增、編輯、線上刪除、搜尋、CSV 匯入與匯出。
 - 排序與視覺化：可依成績或獎勵點數排序，顯示班級平均、中位數、平均點數與前 10 名橫條比較圖。
 - 正向獎勵：六種集點行為說明、個人或多人快速加點、四個點數級距、科學玩具／3D 列印／盲盒獎品目錄與完整兌換流水帳。
 - 成績與評量：自訂滿分與權重、直接輸入成績、加權平均、CSV 匯出。
@@ -43,15 +43,24 @@ npm run preview
 
 產物會輸出至 `dist/`。推送到 `main` 後，GitHub Actions 會自動部署到 GitHub Pages，也可再嵌入 Google Sites。
 
+## 測試
+
+```bash
+npx playwright install chromium   # 首次
+npm test
+```
+
+41 項端對端測試涵蓋十個頁面、舊資料遷移、學生管理、成績與匯入、出席、資源分年級與手機版面，針對建置後的正式產物執行。詳見 [自動化測試](docs/testing.md)。
+
 ## 登入與雲端資料庫
 
 依 [Firebase 登入與雲端資料庫設定](docs/firebase-setup.md) 建立 Firebase 專案並填入 `js/firebase-config.js`，即可啟用 Google 登入與跨裝置同步。未設定前維持純本機模式。
 
 ## Google 串接
 
-請依 [Google Workspace 串接指南](docs/google-integration.md) 部署 `integrations/apps-script/Code.gs`（目前 `SCRIPT_VERSION = 2.1.0`）。未完成 Google 授權前，系統會保持本機模式，不會聲稱資料已同步。
+請依 [Google Workspace 串接指南](docs/google-integration.md) 部署 `integrations/apps-script/Code.gs`（目前 `SCRIPT_VERSION = 2.5.0`）。未完成 Google 授權前，系統會保持本機模式，不會聲稱資料已同步。
 
-部署後請到「串接與設定 → 連線診斷」執行**唯讀診斷**與**寫入測試**：前者檢查指令碼版本、10 個 Sheets 分頁欄位、Drive 資料夾與最新備份；後者實際建立並自動刪除暫存分頁、Drive 檔案與 Google 文件，驗證三種寫入權限。診斷結果可一鍵複製成純文字。
+部署後請到「串接與設定 → 連線診斷」執行**唯讀診斷**與**寫入測試**：前者檢查指令碼版本、12 個 Sheets 分頁欄位、每日自動備份觸發器、Drive 資料夾與最新備份；後者實際建立並自動刪除暫存分頁、Drive 檔案與 Google 文件，驗證三種寫入權限。診斷結果可一鍵複製成純文字。
 
 ## 設計原則
 
@@ -67,7 +76,10 @@ npm run preview
 - [產品開發提示詞](docs/product-prompt.md)
 - [同類平台研究](docs/market-research.md)
 - [資料模型](docs/data-model.md)
+- [自動化測試](docs/testing.md)
 - [測試報告](docs/test-report.md)
+- [Firebase 登入與雲端資料庫設定](docs/firebase-setup.md)
+- [Google Workspace 串接指南](docs/google-integration.md)
 - [自然教室一原配置圖](assets/images/classroom-layout-reference.jpg)
 - [中英文分享文案](share/facebook-post.html)
 

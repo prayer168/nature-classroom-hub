@@ -52,6 +52,9 @@ input[type="checkbox"] { width: 1.1rem; height: 1.1rem; accent-color: var(--fore
 .skip-link:focus { top: 1rem; }
 .sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .muted { color: var(--muted); }
+/* 有 display 的 class 會蓋掉 hidden 屬性預設的 display:none，
+   導致「隱藏」的區塊其實還看得見，這裡統一把 hidden 拉回最高優先。 */
+[hidden] { display: none !important; }
 .center { text-align: center; }
 .full { width: 100%; }
 

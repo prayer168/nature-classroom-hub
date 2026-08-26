@@ -60,12 +60,59 @@ allow read, write: if request.auth != null
 
 ## 4. 驗收
 
+### 4-1 登入
+
 1. 開 https://prayer168.github.io/nature-classroom-hub/settings.html
 2. 「登入與雲端資料庫」→「使用 Google 登入」→ 選擇帳號
 3. 狀態變成「已登入」，下方顯示帳號與最後同步時間
 4. 隨便改一筆資料（例如改一個成績），等約 3 秒
-5. 到 Firebase 主控台 → Firestore → 應該看到 `users/{你的uid}/` 底下出現文件
-6. 換一台裝置（或另一個瀏覽器）登入同一帳號，確認看到同一份資料
+
+### 4-2 到 Firestore 確認資料真的上去了
+
+1. 開 [Firebase 主控台](https://console.firebase.google.com/)，選你的專案
+2. 左側「專案捷徑」點 **Firestore**（或左側選單 → 建構 → Firestore Database）
+3. 上方確認選的是 **「面板檢視畫面」**分頁，不是「查詢建立工具」
+4. 最左欄點 **`users`**
+5. 中間欄出現一份以你的 uid 命名的文件（一長串英數字），點它
+6. 右欄是子集合清單，應該看到 **`sections`** 與 **`meta`**
+   （若是從第一階段升級上來的，還會有 `data` 與 `attendance` 兩個舊集合，那是保留的備援）
+7. 點 **`sections`**，文件清單應該包含：
+
+   ```
+   assessments   attendanceLog   attendance__2026-08   lessons
+   meta          observations    resources             rewardsLedger
+   rewardsMenu   scoreStatus     scores                students
+   transferLog
+   ```
+
+   `attendance__YYYY-MM` 是出席的月份分片，有幾個月就有幾份。
+   用兩個底線是因為 Firestore 文件名稱不接受冒號。
+
+8. 點 **`students`**，右邊會顯示四個欄位：
+
+   | 欄位 | 預期內容 |
+   | --- | --- |
+   | `payload` | JSON 字串，開頭類似 `{"students":[{"active":true,...` |
+   | `rev` | 數字，至少 1，每次寫入加一 |
+   | `deviceId` | `dev-` 開頭的字串 |
+   | `updatedAt` | ISO 時間字串 |
+
+   看到 `rev` 就代表逐區段並行控制已經生效。
+
+9. 回到 uid 那層 → **`meta`** → **`index`**，欄位有 `updatedAt`、`deviceId` 與 `sections` 陣列。
+
+**若 `sections` 沒出現**：多半是瀏覽器還在跑舊版程式。到設定頁按 Ctrl+Shift+R 強制重新載入，
+確認狀態是「已登入」，改一筆資料等幾秒，再回 Firestore 重新整理。
+
+### 4-3 跨裝置與並行測試
+
+1. 換一台裝置（或同一台開無痕視窗）登入同一帳號，確認看到同一份資料
+2. 兩邊各改**不同**學生的成績 → 等幾秒，兩邊都應該看得到兩筆變更
+3. 兩邊改**同一位**學生的**同一項**成績 → 後同步的那台保留自己的版本，
+   並在設定頁的「登入與雲端資料庫」區塊看到衝突提示，列出被覆蓋的項目
+
+確認以上都正常後，第一階段留下的 `data` 與 `attendance` 兩個舊集合就可以刪除
+（點該集合 → 右上角三個點 → 刪除集合）。
 
 ## 5. 資料如何存放
 

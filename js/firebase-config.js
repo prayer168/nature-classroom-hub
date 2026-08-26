@@ -9,12 +9,12 @@
  * 尚未填寫時，系統會維持純本機模式，不會顯示登入功能。
  */
 export const firebaseConfig = {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyC9Yx_U3COzf8l2XT18u8IqcsrEgDb2f_U",
+  authDomain: "nature-classroom-hub.firebaseapp.com",
+  projectId: "nature-classroom-hub",
+  storageBucket: "nature-classroom-hub.firebasestorage.app",
+  messagingSenderId: "345993417485",
+  appId: "1:345993417485:web:927fdb4181a14d97bc5644"
 };
 
 export const isFirebaseConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
